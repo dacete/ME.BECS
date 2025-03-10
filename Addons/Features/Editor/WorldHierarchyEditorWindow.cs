@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.UIElements;
 using UnityEngine.UIElements;
+using Unity.Mathematics;
 
 namespace ME.BECS.Editor {
 
