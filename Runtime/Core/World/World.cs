@@ -12,6 +12,8 @@ namespace ME.BECS {
         public const ushort FIXED_UPDATE = 2;
         public const ushort LATE_UPDATE = 3;
 
+        public const ushort MAX = 4;
+
     }
 
     public enum WorldMode : byte {
@@ -26,7 +28,7 @@ namespace ME.BECS {
         public bool isCreated => Worlds.IsAlive(this.id);
         public ushort id;
         [NativeDisableUnsafePtrRestriction]
-        public State* state;
+        public safe_ptr<State> state;
         public string Name => Worlds.GetWorldName(this.id).ToString();
 
         [INLINE(256)]
@@ -41,8 +43,8 @@ namespace ME.BECS {
             var world = new World() {
                 state = statePtr,
             };
-            statePtr->Initialize(statePtr, properties.stateProperties);
-            world.state->worldState = WorldState.Initialized;
+            statePtr.ptr->Initialize(statePtr, properties.stateProperties);
+            world.state.ptr->worldState = WorldState.Initialized;
 
             if (switchContext == true) Context.Switch(world);
             Worlds.AddWorld(ref world, name: properties.name);
@@ -59,7 +61,7 @@ namespace ME.BECS {
             var world = new World() {
                 state = statePtr,
             };
-            world.state->worldState = WorldState.Initialized;
+            world.state.ptr->worldState = WorldState.Initialized;
 
             if (switchContext == true) Context.Switch(world);
             Worlds.AddWorld(ref world, name: properties.name, raiseCallback: false);
@@ -75,12 +77,12 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public Unity.Jobs.JobHandle Tick(float dt, ushort updateType = 0, Unity.Jobs.JobHandle dependsOn = default) {
+        public Unity.Jobs.JobHandle Tick(uint deltaTimeMs, ushort updateType = 0, Unity.Jobs.JobHandle dependsOn = default) {
 
             E.IS_CREATED(this);
             
             dependsOn = State.SetWorldState(in this, WorldState.BeginTick, updateType, dependsOn);
-            dependsOn = this.TickWithoutWorldState(dt, updateType, dependsOn);
+            dependsOn = this.TickWithoutWorldState(deltaTimeMs, updateType, dependsOn);
             dependsOn = State.SetWorldState(in this, WorldState.EndTick, updateType, dependsOn);
 
             return dependsOn;
@@ -88,7 +90,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public Unity.Jobs.JobHandle TickWithoutWorldState(float dt, ushort updateType, Unity.Jobs.JobHandle dependsOn = default) {
+        public Unity.Jobs.JobHandle TickWithoutWorldState(uint deltaTimeMs, ushort updateType, Unity.Jobs.JobHandle dependsOn = default) {
 
             E.IS_CREATED(this);
             
@@ -96,13 +98,13 @@ namespace ME.BECS {
 
             dependsOn = State.BurstMode(this.state, true, dependsOn);
             dependsOn = Batches.Apply(dependsOn, this.state);
-            dependsOn = OneShotTasks.ResolveTasks(this.state, OneShotType.NextTick, updateType, dependsOn);
+            dependsOn = OneShotTasks.ScheduleJobs(this.state, OneShotType.NextTick, updateType, dependsOn);
             {
                 if (updateType == UpdateType.FIXED_UPDATE) dependsOn = State.NextTick(this.state, dependsOn);
-                dependsOn = this.TickRootSystemGroup(dt, updateType, dependsOn);
+                dependsOn = this.TickRootSystemGroup(deltaTimeMs, updateType, dependsOn);
                 dependsOn = Batches.Apply(dependsOn, this.state);
             }
-            dependsOn = OneShotTasks.ResolveTasks(this.state, OneShotType.CurrentTick, updateType, dependsOn);
+            dependsOn = OneShotTasks.ScheduleJobs(this.state, OneShotType.CurrentTick, updateType, dependsOn);
             dependsOn = Batches.Apply(dependsOn, this.state);
             dependsOn = State.BurstMode(this.state, false, dependsOn);
 
@@ -121,13 +123,13 @@ namespace ME.BECS {
         public Unity.Jobs.JobHandle Dispose(Unity.Jobs.JobHandle dependsOn) {
 
             E.IS_CREATED(this);
-            if (this.state == null) return dependsOn;
+            if (this.state.ptr == null) return dependsOn;
 
-            if (Context.world.state == this.state) Context.world = default;
+            if (Context.world.state.ptr == this.state.ptr) Context.world = default;
 
             dependsOn = this.UnassignRootSystemGroup(dependsOn);
             Worlds.ReleaseWorld(this);
-            this.state->Dispose();
+            this.state.ptr->Dispose();
             _free(ref this.state);
             this = default;
 

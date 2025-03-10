@@ -2,6 +2,8 @@ namespace ME.BECS {
 
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     
+    public class ConfigDrawerAttribute : UnityEngine.PropertyAttribute {}
+    
     [System.Serializable]
     public struct Config : System.IEquatable<Config> {
 
@@ -20,9 +22,22 @@ namespace ME.BECS {
             return false;
         }
         
+        public static bool operator ==(Config a, Config b) {
+            return a.sourceId == b.sourceId;
+        }
+
+        public static bool operator !=(Config a, Config b) {
+            return !(a == b);
+        }
+
         [INLINE(256)]
         public readonly UnsafeEntityConfig AsUnsafeConfig() {
             return EntityConfigsRegistry.GetUnsafeEntityConfigBySourceId(this.sourceId);
+        }
+        
+        [INLINE(256)]
+        public readonly EntityConfig Get() {
+            return EntityConfigsRegistry.GetEntityConfigBySourceId(this.sourceId);
         }
 
         public bool Equals(Config other) {

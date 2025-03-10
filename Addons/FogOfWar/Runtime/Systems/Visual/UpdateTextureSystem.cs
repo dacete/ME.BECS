@@ -7,35 +7,34 @@ namespace ME.BECS.FogOfWar {
     using ME.BECS.Players;
     using Unity.Collections;
     using ME.BECS.Jobs;
-    using Unity.Mathematics;
     using static Cuts;
 
     //[BURST(CompileSynchronously = true)]
-    [RequiredDependencies(typeof(CreateSystem), typeof(PlayersSystem))]
+    [RequiredDependencies(typeof(CreateTextureSystem))]
     public unsafe struct UpdateTextureSystem : IUpdate {
 
-        public float fadeInSpeed;
-        public float fadeOutSpeed;
+        public sfloat fadeInSpeed;
+        public sfloat fadeOutSpeed;
 
         private Ent lastActivePlayer;
+        private Ent camera;
+        private ulong lastTick;
 
-        private VisualWorld visualWorld;
-
-        public void SetVisualWorld(in VisualWorld visualWorld) {
-            this.visualWorld = visualWorld;
+        public void SetCamera(in ME.BECS.Views.CameraAspect camera) {
+            this.camera = camera.ent;
         }
-
-        public VisualWorld GetVisualWorld() => this.visualWorld;
+        
+        public ME.BECS.Views.CameraAspect GetCamera() => this.camera.GetAspect<ME.BECS.Views.CameraAspect>();
 
         [BURST(CompileSynchronously = true, FloatMode = Unity.Burst.FloatMode.Fast, FloatPrecision = Unity.Burst.FloatPrecision.Low, OptimizeFor = Unity.Burst.OptimizeFor.Performance)]
         public struct UpdateJob : IJobParallelFor {
 
-            public float dt;
-            public float fadeInSpeed;
-            public float fadeOutSpeed;
+            public sfloat dt;
+            public sfloat fadeInSpeed;
+            public sfloat fadeOutSpeed;
             public FogOfWarStaticComponent props;
             public FogOfWarComponent fow;
-            public int textureWidth;
+            public uint textureWidth;
             //public int textureHeight;
             [NativeDisableParallelForRestriction]
             [NativeDisableUnsafePtrRestriction]
@@ -79,7 +78,7 @@ namespace ME.BECS.FogOfWar {
             
             public void Execute() {
 
-                _memcpy(this.fow.nodes.GetUnsafePtr(), this.currentBuffer, this.fow.nodes.Length);
+                _memcpy(this.fow.nodes.GetUnsafePtr(), (safe_ptr)this.currentBuffer, this.fow.nodes.Length);
 
             }
 
@@ -99,21 +98,24 @@ namespace ME.BECS.FogOfWar {
 
         public void OnUpdate(ref SystemContext context) {
 
-            var createTexture = context.world.GetSystem<CreateTextureSystem>();
-            if (createTexture.IsCreated == false) return;
+            var logicWorld = context.world.parent;
+            E.IS_CREATED(logicWorld);
             
-            var playersSystem = context.world.GetSystem<PlayersSystem>();
+            var createTexture = context.world.GetSystem<CreateTextureSystem>();
+            
+            var playersSystem = logicWorld.GetSystem<PlayersSystem>();
             var activePlayer = playersSystem.GetActivePlayer();
-            if (this.lastActivePlayer != activePlayer.ent) {
+            if (this.lastActivePlayer != activePlayer.ent || logicWorld.state.ptr->tick < this.lastTick) {
                 // clean up textures because we need to rebuild them for current player
                 FogOfWarUtils.CleanUpTexture(createTexture.GetBuffer());
             }
             this.lastActivePlayer = activePlayer.ent;
-            var fow = activePlayer.team.Read<FogOfWarComponent>();
+            var fow = activePlayer.readTeam.Read<FogOfWarComponent>();
             
             var buffer = createTexture.GetBuffer();
+            this.lastTick = logicWorld.state.ptr->tick;
         
-            var system = context.world.GetSystem<CreateSystem>();
+            var system = logicWorld.GetSystem<CreateSystem>();
             var props = system.heights.Read<FogOfWarStaticComponent>();
             var handle = new UpdateJob() {
                 dt = context.deltaTime,
@@ -121,7 +123,7 @@ namespace ME.BECS.FogOfWar {
                 fadeOutSpeed = this.fadeOutSpeed,
                 props = props,
                 fow = fow,
-                textureWidth = (int)system.mapSize.x,
+                textureWidth = props.size.x,
                 //textureHeight = (int)system.mapSize.y,
                 currentBuffer = (UnityEngine.Color32*)buffer.GetUnsafePtr(),
             }.Schedule(buffer.Length / 4, JobUtils.GetScheduleBatchCount(buffer.Length));

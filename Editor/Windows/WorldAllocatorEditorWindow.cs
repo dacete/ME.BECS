@@ -25,7 +25,7 @@ namespace ME.BECS.Editor {
 
             if (this.world.isCreated == true) {
                 
-                this.DrawAllocator(root, in this.world.state->allocator);
+                this.DrawAllocator(root, in this.world.state.ptr->allocator);
                 
             }
 
@@ -35,7 +35,7 @@ namespace ME.BECS.Editor {
 
             if (this.world.isCreated == true) {
                 
-                this.RedrawAllocator(this.scrollRoot.contentContainer, in this.world.state->allocator);
+                this.RedrawAllocator(this.scrollRoot.contentContainer, in this.world.state.ptr->allocator);
                 
             }
             
@@ -171,21 +171,19 @@ namespace ME.BECS.Editor {
             
             this.reservedSize.text = EditorUtils.BytesToString(allocator.GetReservedSize());
             this.usedSize.text = EditorUtils.BytesToString(allocator.GetUsedSize());
-            this.componentsSize.text = EditorUtils.BytesToString((int)this.world.state->components.GetReservedSizeInBytes(this.world.state));
-            this.archetypesSize.text = EditorUtils.BytesToString((int)this.world.state->archetypes.GetReservedSizeInBytes(this.world.state));
-            this.batchesSize.text = EditorUtils.BytesToString((int)this.world.state->batches.GetReservedSizeInBytes(this.world.state));
-            this.entitiesSize.text = EditorUtils.BytesToString((int)this.world.state->entities.GetReservedSizeInBytes(this.world.state));
-            this.aspectsSize.text = EditorUtils.BytesToString((int)this.world.state->aspectsStorage.GetReservedSizeInBytes(this.world.state));
-            this.collectionsRegistrySize.text = EditorUtils.BytesToString((int)this.world.state->collectionsRegistry.GetReservedSizeInBytes(this.world.state));
-            /*{
-                var allocatorInstance = WorldsPersistentAllocator.allocatorPersistent.Allocator;
-                this.persistantAllocatorSize.text =
-                    $"{EditorUtils.BytesToString((int)allocatorInstance.BytesUsed)}/{EditorUtils.BytesToString((int)allocatorInstance.BytesAllocated)} (Blocks: {allocatorInstance.BlocksUsed}/{allocatorInstance.BlocksAllocated})";
-            }*/
+            this.componentsSize.text = EditorUtils.BytesToString((int)Components.GetReservedSizeInBytes(this.world.state));
+            this.archetypesSize.text = EditorUtils.BytesToString((int)this.world.state.ptr->archetypes.GetReservedSizeInBytes(this.world.state));
+            this.batchesSize.text = EditorUtils.BytesToString((int)Batches.GetReservedSizeInBytes(this.world.state));
+            this.entitiesSize.text = EditorUtils.BytesToString((int)this.world.state.ptr->entities.GetReservedSizeInBytes(this.world.state));
+            this.aspectsSize.text = EditorUtils.BytesToString((int)this.world.state.ptr->aspectsStorage.GetReservedSizeInBytes(this.world.state));
+            this.collectionsRegistrySize.text = EditorUtils.BytesToString((int)CollectionsRegistry.GetReservedSizeInBytes(this.world.state));
             {
-                var allocatorInstance = WorldsTempAllocator.allocatorTemp.Allocator;
-                this.tempAllocatorSize.text = 
-                    $"{EditorUtils.BytesToString((int)(long)allocatorBytesAllocatedProperty.GetMethod.Invoke(allocatorInstance, null))} (Blocks: {allocatorInstance.BlocksAllocated})";
+                var allocatorInstance = WorldsPersistentAllocator.allocatorPersistent.Allocator;
+                this.persistentAllocatorSize.text = $"{EditorUtils.BytesToString((int)(long)allocatorBytesAllocatedProperty.GetMethod.Invoke(allocatorInstance, null))} (Blocks: {allocatorInstance.BlocksAllocated})";
+            }
+            {
+                var allocatorInstance = WorldsTempAllocator.allocatorTemp.Get(this.world.id).Allocator;
+                this.tempAllocatorSize.text = $"{EditorUtils.BytesToString((int)(long)allocatorBytesAllocatedProperty.GetMethod.Invoke(allocatorInstance, null))} (Blocks: {allocatorInstance.BlocksAllocated})";
             }
 
         }
@@ -199,7 +197,7 @@ namespace ME.BECS.Editor {
         private Label entitiesSize;
         private Label aspectsSize;
         private Label collectionsRegistrySize;
-        private Label persistantAllocatorSize;
+        private Label persistentAllocatorSize;
         private Label tempAllocatorSize;
         private void DrawAllocator(VisualElement root, in MemoryAllocator allocator) {
 
@@ -214,7 +212,7 @@ namespace ME.BECS.Editor {
             this.entitiesSize = this.AddCounter(container, "Entities Size", className: "small-counter");
             this.aspectsSize = this.AddCounter(container, "Aspects Size", className: "small-counter");
             this.collectionsRegistrySize = this.AddCounter(container, "Collections Registry Size", className: "small-counter");
-            this.persistantAllocatorSize = this.AddCounter(container, "Persistant Allocator Size", className: "small-counter", true);
+            this.persistentAllocatorSize = this.AddCounter(container, "Persistent Allocator Size", className: "small-counter", true);
             this.tempAllocatorSize = this.AddCounter(container, "Temp Allocator Size", className: "small-counter", true);
             
             this.scrollRoot = new ScrollView();

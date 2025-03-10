@@ -1,8 +1,15 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
+
 namespace ME.BECS.FogOfWar {
     
     using Views;
     using UnityEngine;
-    using Unity.Mathematics;
 
     public class FogOfWarView : EntityView {
 
@@ -14,29 +21,41 @@ namespace ME.BECS.FogOfWar {
         private static readonly int @params = Shader.PropertyToID("_Params");
 
         public Material material;
+        public MeshRenderer meshRenderer;
+        public Transform transformScale;
         private float2 worldSize;
         private Vector3 offset;
 
         protected override void OnInitialize(in EntRO ent) {
             
-            var fowSystem = ent.World.GetSystem<CreateSystem>();
+            var fowSystem = ent.World.parent.GetSystem<CreateSystem>();
             var system = ent.World.GetSystem<CreateTextureSystem>();
             var heightResolution = fowSystem.resolution;
+            this.material = new Material(this.material);
             this.material.SetTexture(fogTex, system.GetTexture());
-            this.material.SetFloat(resolution, heightResolution);
+            this.material.SetFloat(resolution, (float)heightResolution);
+            if (this.meshRenderer != null) {
+                this.meshRenderer.sharedMaterial = this.material;
+            }
 
             this.worldSize = fowSystem.mapSize;
+
+            if (this.transformScale != null) {
+                this.transformScale.localScale = new Vector3((float)this.worldSize.x, 1f, (float)this.worldSize.y);
+                this.transformScale.localPosition = new Vector3((float)this.worldSize.x * 0.5f, 0f, (float)this.worldSize.y * 0.5f);
+            }
 
         }
 
         protected override void OnUpdate(in EntRO ent, float dt) {
-            
-            var fowSystem = ent.World.GetSystem<CreateSystem>();
+
+            var updateTextureSystem = ent.World.GetSystem<UpdateTextureSystem>();
+            var logicWorld = ent.World.parent;
+            var fowSystem = logicWorld.GetSystem<CreateSystem>();
             var system = ent.World.GetSystem<CreateTextureSystem>();
-            var visualWorld = ent.World.GetSystem<UpdateTextureSystem>().GetVisualWorld();
             this.material.SetTexture(fogTex, system.GetTexture());
 
-            var camera = visualWorld.Camera.GetAspect<CameraAspect>();
+            var camera = updateTextureSystem.GetCamera();
             var proj = (Matrix4x4)camera.projectionMatrix;
             var cam = (Matrix4x4)camera.worldToCameraMatrix;
             var inverseMVP = (proj * cam).inverse;
@@ -57,13 +76,12 @@ namespace ME.BECS.FogOfWar {
                 }
             }
             
-            var p = new Vector4(-x * invScaleX, -y * invScaleY, invScaleX, 0f);
-            this.material.SetTexture(fogTex, system.GetTexture());
+            var p = new float4(-x * invScaleX, -y * invScaleY, invScaleX, 0f);
             var heightResolution = fowSystem.resolution;
-            this.material.SetFloat(resolution, heightResolution);
+            this.material.SetFloat(resolution, (float)heightResolution);
             this.material.SetMatrix(inverseMvp, inverseMVP);
-            this.material.SetVector(pos, camPos);
-            this.material.SetVector(@params, p);
+            this.material.SetVector(pos, (Vector4)camPos);
+            this.material.SetVector(@params, (Vector4)p);
             
         }
 

@@ -1,8 +1,20 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+using Rect = ME.BECS.FixedPoint.Rect;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+using Rect = UnityEngine.Rect;
+#endif
+
 namespace ME.BECS {
 
     public static class EntExt {
 
-        public static void Destroy(this in Ent ent, float lifetime) {
+        public static void Destroy(this in Ent ent, tfloat lifetime) {
 
             ent.Set(new DestroyWithLifetime() { lifetime = lifetime, });
             
@@ -10,8 +22,14 @@ namespace ME.BECS {
 
         public static void DestroyEndTick(this in Ent ent) {
 
-            ent.Set(new DestroyWithLifetime() { lifetime = 0f, });
+            ent.Set(new DestroyWithTicks() { ticks = 0UL, });
             
+        }
+
+        public static void Destroy(this in Ent ent, ulong ticks) {
+
+            ent.Set(new DestroyWithTicks() { ticks = ticks, });
+
         }
 
     }

@@ -23,10 +23,13 @@ namespace ME.BECS.Units {
         public readonly void Add(in UnitAspect unit) => UnitUtils.AddToSelectionGroup(in this, in unit);
 
         [INLINE(256)]
-        public readonly void Remove(in UnitAspect unit) => UnitUtils.RemoveFromSelectionGroup(in unit);
+        public readonly void Remove(in UnitAspect unit) => UnitUtils.RemoveFromSelectionGroup(in this, in unit);
 
         [INLINE(256)]
-        public readonly void RemoveAll() => UnitUtils.DestroySelectionGroup(this);
+        public readonly void RemoveAll() => UnitUtils.DestroySelectionGroup(in this);
+
+        [INLINE(256)]
+        public readonly void Destroy() => UnitUtils.DestroySelectionGroup(in this);
 
         [INLINE(256)]
         public void Replace(in UnitSelectionTempGroupAspect group) {
@@ -59,7 +62,9 @@ namespace ME.BECS.Units {
         public AspectDataPtr<SelectionGroupComponent> groupDataPtr;
 
         public readonly ref ListAuto<Ent> units => ref this.groupDataPtr.Get(this.ent.id, this.ent.gen).units;
-        
+
+        public readonly ref readonly ListAuto<Ent> readUnits => ref this.groupDataPtr.Read(this.ent.id, this.ent.gen).units;
+
         [INLINE(256)]
         public readonly void Add(in UnitAspect unit) => this.units.Add(unit.ent);
 

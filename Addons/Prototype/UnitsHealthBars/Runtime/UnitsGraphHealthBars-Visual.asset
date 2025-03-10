@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2c47971b42c2144aeb6f0fb81f786410, type: 3}
   m_Name: UnitsGraphHealthBars-Visual
   m_EditorClassIdentifier: 
-  id: 70
+  id: 31
   builtInGraph: 1
   isInnerGraph: 1
   serializedNodes: []
@@ -44,14 +44,14 @@ MonoBehaviour:
   serializedParameterList: []
   stickyNotes: []
   nodeInspectorReference: {fileID: 0}
-  position: {x: -26.5, y: 144, z: 0}
-  scale: {x: 1, y: 1, z: 1}
   references:
     version: 2
     RefIds:
     - rid: 4603152874872242266
       type: {class: SystemNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
+        syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: b8df3fe9-e032-40db-9148-635a000c92ba
         groupGUID: 
@@ -75,11 +75,17 @@ MonoBehaviour:
         healthBarMaterial:
           id: 3
         barSettings:
-          sectionWidth: 6
-          height: 3
+          sectionWidth:
+            rawValue: 1084227584
+          height:
+            rawValue: 1084227584
+          referenceScale:
+            rawValue: 1137180672
     - rid: 8346928920201003080
       type: {class: StartNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
+        syncPoint: 0
+        syncCount: 1
         nodeCustomName: 
         GUID: StartNode
         groupGUID: 
@@ -99,6 +105,8 @@ MonoBehaviour:
     - rid: 8346928920201003081
       type: {class: ExitNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
+        syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: EndNode
         groupGUID: 

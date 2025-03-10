@@ -1,9 +1,16 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
+
 namespace ME.BECS.Pathfinding {
 
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using Unity.Mathematics;
     using ME.BECS.Transforms;
-    
+
     public static class GraphUtils {
 
         [INLINE(256)]
@@ -43,6 +50,11 @@ namespace ME.BECS.Pathfinding {
 
         }
 
+        /// <summary>
+        /// Returns half-size, snapped to a grid rect size vector
+        /// </summary>
+        /// <param name="size">Vector with half-width and half-height of a rect</param>
+        /// <returns></returns>
         [INLINE(256)]
         public static float2 SnapSize(uint2 size) {
 
@@ -69,7 +81,8 @@ namespace ME.BECS.Pathfinding {
         [INLINE(256)]
         public static bool IsGraphMaskValid(in BuildGraphSystem system, in float3 position, in quaternion rotation, uint2 size, byte minCost, byte maxCost) {
 
-            foreach (var graph in system.graphs) {
+            for (uint i = 0u; i < system.graphs.Length; ++i) {
+                var graph = system.graphs[system.world.state, i];
                 if (IsGraphMaskValid(in graph, in position, in rotation, size, minCost, maxCost) == false) return false;
             }
 
@@ -86,8 +99,8 @@ namespace ME.BECS.Pathfinding {
             var sizeSnap = SnapSize(size);
             var posMin = pos - sizeSnap;
             var posMax = pos + sizeSnap;
-            for (float x = posMin.x; x <= posMax.x; x += root.nodeSize) {
-                for (float y = posMin.y; y <= posMax.y; y += root.nodeSize) {
+            for (tfloat x = posMin.x; x <= posMax.x; x += root.nodeSize) {
+                for (tfloat y = posMin.y; y <= posMax.y; y += root.nodeSize) {
                     var worldPos = new float3(math.floor(x), 0f, math.floor(y));
                     var graphPos = math.mul(rotation, worldPos - position) + position;
                     var globalCoord = Graph.GetGlobalCoord(in root, graphPos);
@@ -108,7 +121,7 @@ namespace ME.BECS.Pathfinding {
         public static void DestroyGraphMask(in Ent ent) {
 
             { // Apply to graphs
-                var mask = ent.Read<GraphMaskComponent>();
+                var mask = ent.Read<GraphMaskRuntimeComponent>();
                 mask.Destroy();
             }
             ent.DestroyHierarchy();
@@ -116,42 +129,62 @@ namespace ME.BECS.Pathfinding {
         }
         
         [INLINE(256)]
-        public static Ent CreateGraphMask(in float3 position, in quaternion rotation, uint2 size, byte cost = Graph.UNWALKABLE, float height = 1f, ObstacleChannel obstacleChannel = ObstacleChannel.Obstacle, bool ignoreGraphRadius = false, JobInfo jobInfo = default) {
+        public static Ent CreateGraphMask(in float3 position, in quaternion rotation, uint2 size, byte cost = Graph.UNWALKABLE, ObstacleChannel obstacleChannel = ObstacleChannel.Obstacle, bool ignoreGraphRadius = false, int graphMask = -1, in JobInfo jobInfo = default) {
 
-            var ent = Ent.New(jobInfo);
-            return CreateGraphMask(in ent, in position, in rotation, size, cost, height, obstacleChannel, ignoreGraphRadius);
+            var ent = Ent.New(in jobInfo);
+            return CreateGraphMask(in ent, in position, in rotation, size, cost, 1f, obstacleChannel, ignoreGraphRadius, graphMask);
 
         }
 
         [INLINE(256)]
-        public static Ent CreateGraphMask(in Ent ent, in float3 position, in quaternion rotation, uint2 size, byte cost = Graph.UNWALKABLE, float height = 1f, ObstacleChannel obstacleChannel = ObstacleChannel.Obstacle, bool ignoreGraphRadius = false) {
+        public static Ent CreateGraphMask(in Ent ent, in float3 position, in quaternion rotation, uint2 size, byte cost = Graph.UNWALKABLE, ObstacleChannel obstacleChannel = ObstacleChannel.Obstacle, bool ignoreGraphRadius = false, int graphMask = -1) {
 
-            var heights = new MemArrayAuto<float>(in ent, 1u);
+            var heights = new MemArrayAuto<tfloat>(in ent, 1u);
+            heights[0u] = 1f;
+            return CreateGraphMask(in ent, in position, in rotation, size, cost, obstacleChannel, ignoreGraphRadius, heights, 1u, graphMask);
+
+        }
+
+        [INLINE(256)]
+        public static Ent CreateGraphMask(in float3 position, in quaternion rotation, uint2 size, byte cost, tfloat height, ObstacleChannel obstacleChannel = ObstacleChannel.Obstacle, bool ignoreGraphRadius = false, int graphMask = -1, in JobInfo jobInfo = default) {
+
+            var ent = Ent.New(in jobInfo);
+            return CreateGraphMask(in ent, in position, in rotation, size, cost, height, obstacleChannel, ignoreGraphRadius, graphMask);
+
+        }
+
+        [INLINE(256)]
+        public static Ent CreateGraphMask(in Ent ent, in float3 position, in quaternion rotation, uint2 size, byte cost, tfloat height, ObstacleChannel obstacleChannel = ObstacleChannel.Obstacle, bool ignoreGraphRadius = false, int graphMask = -1) {
+
+            var heights = new MemArrayAuto<tfloat>(in ent, 1u);
             heights[0u] = height;
-            return CreateGraphMask(in ent, in position, in rotation, size, cost, obstacleChannel, ignoreGraphRadius, heights, 1u);
+            return CreateGraphMask(in ent, in position, in rotation, size, cost, obstacleChannel, ignoreGraphRadius, heights, 1u, graphMask);
 
         }
 
         [INLINE(256)]
-        public static Ent CreateGraphMask(in Ent ent, in float3 position, in quaternion rotation, uint2 size, byte cost, ObstacleChannel obstacleChannel, bool ignoreGraphRadius, MemArrayAuto<float> heights, uint heightsSizeX) {
+        public static Ent CreateGraphMask(in Ent ent, in float3 position, in quaternion rotation, uint2 size, byte cost, ObstacleChannel obstacleChannel, bool ignoreGraphRadius, MemArrayAuto<tfloat> heights, uint heightsSizeX, int graphMask) {
 
-            var buildGraphSystem = ent.World.GetSystem<BuildGraphSystem>();
             var obstacle = new GraphMaskComponent() {
                 offset = float2.zero,
                 size = size,
-                heights = heights,
                 heightsSizeX = heightsSizeX,
-                ignoreGraphRadius = ignoreGraphRadius,
+                ignoreGraphRadius = (byte)(ignoreGraphRadius == true ? 1 : 0),
                 cost = cost,
-                nodes = new ListAuto<GraphNodeMemory>(in ent, (uint)(size.x * size.y * buildGraphSystem.graphs.Length)),
                 obstacleChannel = obstacleChannel,
+                graphMask = graphMask,
+            };
+            var runtime = new GraphMaskRuntimeComponent() {
+                heights = heights,
+                nodes = new ListAuto<GraphNodeMemory>(in ent, size.x * size.y),
             };
             var obstacleTr = ent.GetOrCreateAspect<TransformAspect>();
             obstacleTr.position = position;
             obstacleTr.rotation = rotation;
             ent.Set(obstacle);
+            ent.Set(runtime);
             ent.Set(new IsGraphMaskDirtyComponent());
-            ent.RegisterAutoDestroy<GraphMaskComponent>();
+            ent.RegisterAutoDestroy<GraphMaskRuntimeComponent>();
             return ent;
 
         }
@@ -291,18 +324,19 @@ namespace ME.BECS.Pathfinding {
         }
 
         [INLINE(256)]
-        public static float GetObstacleHeight(in float3 localObstaclePosition, in MemArrayAuto<float> obstacleHeights, in float2 obstacleSize, uint obstacleHeightsSizeX) {
+        public static tfloat GetObstacleHeight(in float3 localObstaclePosition, in MemArrayAuto<tfloat> obstacleHeights, in float2 obstacleSize, uint obstacleHeightsSizeX) {
+            var obstacleHeightsSizeY = obstacleHeights.Length / obstacleHeightsSizeX;
             var x = (int)(localObstaclePosition.x / obstacleSize.x * obstacleHeightsSizeX);
             var y = (int)(localObstaclePosition.z / obstacleSize.y * obstacleHeightsSizeX);
             if (x < 0) x = 0;
             if (x >= obstacleHeightsSizeX) x = (int)obstacleHeightsSizeX - 1;
             if (y < 0) y = 0;
-            if (y >= obstacleHeightsSizeX) y = (int)obstacleHeightsSizeX - 1;
+            if (y >= obstacleHeightsSizeY) y = (int)obstacleHeightsSizeY - 1;
             return obstacleHeights[(uint)y * obstacleHeightsSizeX + (uint)x];
         }
 
         [INLINE(256)]
-        public static float GetObstacleHeight(float3 localObstaclePosition, float[] obstacleHeights, in float2 obstacleSize, uint obstacleHeightsSizeX) {
+        public static tfloat GetObstacleHeight(float3 localObstaclePosition, tfloat[] obstacleHeights, in float2 obstacleSize, uint obstacleHeightsSizeX) {
             var x = (int)(localObstaclePosition.x / obstacleSize.x * obstacleHeightsSizeX);
             var y = (int)(localObstaclePosition.z / obstacleSize.y * obstacleHeightsSizeX);
             if (x < 0) x = 0;

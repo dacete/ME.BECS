@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2c47971b42c2144aeb6f0fb81f786410, type: 3}
   m_Name: Pathfinding-BuildGraph
   m_EditorClassIdentifier: 
-  id: 10
+  id: 24
   builtInGraph: 1
   isInnerGraph: 1
   serializedNodes: []
@@ -53,15 +53,14 @@ MonoBehaviour:
   serializedParameterList: []
   stickyNotes: []
   nodeInspectorReference: {fileID: 0}
-  position: {x: -79, y: 209, z: 0}
-  scale: {x: 1, y: 1, z: 1}
   references:
     version: 2
     RefIds:
     - rid: 8346928920201003102
       type: {class: StartNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
-        syncPoint: 1
+        syncPoint: 0
+        syncCount: 1
         nodeCustomName: 
         GUID: StartNode
         groupGUID: 
@@ -82,6 +81,7 @@ MonoBehaviour:
       type: {class: ExitNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
         syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: EndNode
         groupGUID: 
@@ -102,6 +102,7 @@ MonoBehaviour:
       type: {class: SystemNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
         syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: cfce7412-e9ad-434b-bc8a-aeb877708187
         groupGUID: 
@@ -111,7 +112,7 @@ MonoBehaviour:
           x: 147
           y: 0
           width: 300
-          height: 149
+          height: 140
         expanded: 1
         enabled: 1
         debug: 0
@@ -123,11 +124,12 @@ MonoBehaviour:
       type: {class: BuildGraphSystem, ns: ME.BECS.Pathfinding, asm: ME.BECS.Pathfinding}
       data:
         agentTypesConfig:
-          id: 5
+          id: 201
     - rid: 8346928920201003106
       type: {class: SystemNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
         syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: 123f146c-0ce5-48ca-94ce-f4d3993ce5ff
         groupGUID: 

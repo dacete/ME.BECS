@@ -1,8 +1,16 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+#endif
 
 namespace ME.BECS.UnitsHealthBars {
     
     using BURST = Unity.Burst.BurstCompileAttribute;
-    using Unity.Mathematics;
     using ME.BECS.Jobs;
     using ME.BECS.Views;
     using ME.BECS.Transforms;
@@ -11,7 +19,6 @@ namespace ME.BECS.UnitsHealthBars {
     using ME.BECS.Players;
     
     [BURST(CompileSynchronously = true)]
-    [RequiredDependencies(typeof(CreateSystem), typeof(PlayersSystem))]
     [UnityEngine.Tooltip("Drawing health bars via GL API")]
     public struct DrawHealthBarsSystem : IAwake, IUpdate, IDestroy {
 
@@ -31,8 +38,8 @@ namespace ME.BECS.UnitsHealthBars {
             public BarSettings settings;
             public float2 position;
             public float2 heightPosition;
-            public float barLerpValue;
-            public float healthPercent;
+            public tfloat barLerpValue;
+            public tfloat healthPercent;
             public byte barLerpIndex;
 
         }
@@ -41,33 +48,35 @@ namespace ME.BECS.UnitsHealthBars {
         public struct BarSettings {
 
             public int Sections => math.min(MAX_SECTIONS, math.max(MIN_SECTIONS, (int)math.ceil(this.health / MAX_HEALTH * MAX_SECTIONS)));
-            internal float health;
-            public float sectionWidth;
-            public float height;
+            internal tfloat health;
+            public tfloat sectionWidth;
+            public tfloat height;
+            public tfloat referenceScale;
 
-            public float Width => this.Sections * (this.sectionWidth + 1f) - 1f;
-            public float Height => this.height + 2f;
+            public tfloat GetWidth(tfloat scale) => this.Sections * (this.sectionWidth * scale + 1f) - 1f;
+            public tfloat GetHeight(tfloat scale) => this.height * scale + 2f;
 
         }
 
-        public ME.BECS.Addons.ObjectReference<UnityEngine.Material> healthBarMaterial;
+        public BECS.ObjectReference<UnityEngine.Material> healthBarMaterial;
         public BarSettings barSettings;
         private ME.BECS.NativeCollections.NativeParallelList<BarItem> bars;
-        private VisualWorld visualWorld;
-        
-        [BURST(CompileSynchronously = true)]
-        public struct Job : IJobParallelForAspect<UnitAspect> {
+        private Ent cameraEnt;
+        private ClassPtr<UnityEngine.Camera> cameraObject;
 
-            public CreateSystem fow;
+        [BURST(CompileSynchronously = true)]
+        public struct Job : IJobForAspects<UnitAspect> {
+
+            public SystemLink<CreateSystem> fow;
             public PlayerAspect activePlayer;
             public ME.BECS.NativeCollections.NativeParallelList<BarItem> bars;
             public BarSettings barSettings;
             public CameraAspect camera;
             
-            public void Execute(in JobInfo jobInfo, ref UnitAspect unit) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref UnitAspect unit) {
 
                 if (unit.readHealth >= unit.readHealthMax) return;
-                if (this.fow.IsVisible(in this.activePlayer, unit.ent) == false) return;
+                if (this.fow.IsCreated == true && this.fow.Value.IsVisible(in this.activePlayer, unit.ent) == false) return;
                 
                 var unitPos = unit.ent.GetAspect<TransformAspect>().GetWorldMatrixPosition();
                 var screenPoint = this.camera.WorldToScreenPoint(unitPos);
@@ -77,14 +86,14 @@ namespace ME.BECS.UnitsHealthBars {
                 barInfo.health = unit.readHealthMax;
                 var healthPerSection = unit.readHealthMax / barInfo.Sections;
                 var percent = unit.readHealth / unit.readHealthMax;
-                var healthPercent = math.clamp(unit.readHealth / unit.readHealthMax - math.lerp(healthPerSection / unit.readHealthMax * 2f, 0f, percent), 0f, 1f);
+                var healthPercent = math.clamp(unit.readHealth / (float)unit.readHealthMax - math.lerp(healthPerSection / (float)unit.readHealthMax * 2f, 0f, percent), 0f, 1f);
                 var sectionIndex = (byte)math.floor(healthPercent * barInfo.Sections);
                 this.bars.Add(new BarItem() {
                     settings = barInfo,
                     position = screenPoint.xy,
                     heightPosition = healthBarHeightPos.xy,
                     barLerpIndex = sectionIndex,
-                    barLerpValue = (unit.readHealth - healthPerSection * sectionIndex) / healthPerSection,
+                    barLerpValue = (unit.readHealth - healthPerSection * sectionIndex) / (float)healthPerSection,
                     healthPercent = healthPercent,
                 });
 
@@ -94,17 +103,20 @@ namespace ME.BECS.UnitsHealthBars {
 
         public void OnUpdate(ref SystemContext context) {
 
-            if (this.visualWorld.World.isCreated == false) return;
+            var logicWorld = context.world.parent;
+            E.IS_CREATED(logicWorld);
 
+            if (this.cameraEnt.IsAlive() == false) return;
+            
             this.bars.Clear();
-            var fow = context.world.GetSystem<CreateSystem>();
-            var activePlayer = context.world.GetSystem<PlayersSystem>().GetActivePlayer();
+            var fow = logicWorld.GetSystemLink<CreateSystem>();
+            var activePlayer = logicWorld.GetSystem<PlayersSystem>().GetActivePlayer();
             if (activePlayer.IsAlive() == false) return;
             
-            var handle = context.Query().Schedule<Job, UnitAspect>(new Job() {
+            var handle = API.Query(in logicWorld, context.dependsOn).AsParallel().Schedule<Job, UnitAspect>(new Job() {
                 activePlayer = activePlayer,
                 fow = fow,
-                camera = this.visualWorld.Camera.GetAspect<CameraAspect>(),
+                camera = this.cameraEnt.GetAspect<CameraAspect>(),
                 bars = this.bars,
                 barSettings = this.barSettings,
             });
@@ -116,9 +128,6 @@ namespace ME.BECS.UnitsHealthBars {
         public void OnAwake(ref SystemContext context) {
 
             this.bars = new ME.BECS.NativeCollections.NativeParallelList<BarItem>(100, Constants.ALLOCATOR_DOMAIN);
-            var barsRender = this.visualWorld.GetCameraObject().gameObject.AddComponent<HealthBarsRender>();
-            barsRender.bars = this.bars;
-            barsRender.material = this.healthBarMaterial.Value;
 
         }
 
@@ -128,8 +137,15 @@ namespace ME.BECS.UnitsHealthBars {
 
         }
 
-        public void SetVisualWorld(in VisualWorld visualWorld) {
-            this.visualWorld = visualWorld;
+        public void SetCamera(in CameraAspect cameraAspect, UnityEngine.Camera camera) {
+            CameraUtils.UpdateCamera(in cameraAspect, camera);
+            this.cameraEnt = cameraAspect.ent;
+            this.cameraObject = new ClassPtr<UnityEngine.Camera>(camera);
+            
+            var barsRender = this.cameraObject.Value.gameObject.AddComponent<HealthBarsRender>();
+            barsRender.referenceScale = this.barSettings.referenceScale;
+            barsRender.bars = this.bars;
+            barsRender.material = this.healthBarMaterial.Value;
         }
 
     }

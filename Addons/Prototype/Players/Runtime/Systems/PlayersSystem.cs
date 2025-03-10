@@ -5,7 +5,7 @@ namespace ME.BECS.Players {
     
     [BURST(CompileSynchronously = true)]
     [UnityEngine.Tooltip("Initialize default players")]
-    public struct PlayersSystem : IAwake, IDestroy {
+    public struct PlayersSystem : IAwake {
 
         public static PlayersSystem Default => new PlayersSystem() {
             playersCount = 4u,
@@ -13,25 +13,26 @@ namespace ME.BECS.Players {
         
         public uint playersCount;
         
-        private Unity.Collections.NativeArray<Ent> players;
-        private Unity.Collections.NativeArray<Ent> teams;
+        private MemArrayAuto<Ent> players;
+        private MemArrayAuto<Ent> teams;
         private uint activePlayer;
 
         public void OnAwake(ref SystemContext context) {
 
-            this.players = new Unity.Collections.NativeArray<Ent>((int)this.playersCount, Unity.Collections.Allocator.Persistent);
-            this.teams = new Unity.Collections.NativeArray<Ent>((int)this.playersCount, Unity.Collections.Allocator.Persistent);
+            var ent = Ent.New(in context);
+            this.players = new MemArrayAuto<Ent>(in ent, this.playersCount);
+            this.teams = new MemArrayAuto<Ent>(in ent, this.playersCount);
             for (uint i = 0u; i < this.players.Length; ++i) {
-                var team = Ent.New();
+                var id = i + 1u;
+                var team = Ent.New(in context.world, editorName: $"Team#{id}");
                 team.Set(new TeamComponent() {
-                    id = i + 1u,
+                    id = id,
                 });
                 this.teams[(int)i] = team;
-                //UnityEngine.Debug.Log("Team: " + team);
             }
 
             for (uint i = 0u; i < this.players.Length; ++i) {
-                this.players[(int)i] = PlayerUtils.CreatePlayer(i, this.teams[(int)i]);
+                this.players[(int)i] = PlayerUtils.CreatePlayer(i, this.teams[(int)i], JobInfo.Create(context.world.id));
             }
             
             this.UpdateTeams();
@@ -40,14 +41,8 @@ namespace ME.BECS.Players {
 
         }
 
-        public void OnDestroy(ref SystemContext context) {
-
-            this.players.Dispose();
-            this.teams.Dispose();
-
-        }
-        
-        public Unity.Collections.NativeArray<Ent> GetTeams() => this.teams;
+        public readonly MemArrayAuto<Ent> GetPlayers() => this.players;
+        public readonly MemArrayAuto<Ent> GetTeams() => this.teams;
 
         /// <summary>
         /// Call this method every time you changed player's team
@@ -108,7 +103,9 @@ namespace ME.BECS.Players {
         public unsafe PlayerAspect SetActivePlayer(uint index) {
             E.IS_NOT_IN_TICK(Context.world.state);
             this.activePlayer = index;
-            return this.GetActivePlayer();
+            var player = this.GetActivePlayer();
+            PlayerUtils.SetActivePlayer(in player);
+            return player;
         }
 
         [INLINE(256)]
@@ -118,8 +115,19 @@ namespace ME.BECS.Players {
         }
 
         [INLINE(256)]
-        public PlayerAspect GetPlayerEntity(uint index) {
+        public readonly PlayerAspect GetPlayerEntity(uint index) {
             return this.players[(int)index].GetAspect<PlayerAspect>();
+        }
+
+        [INLINE(256)]
+        public PlayerAspect GetFirstPlayerByTeamId(uint teamId) {
+            for (uint i = 0u; i < this.players.Length; ++i) {
+                var player = this.players[(int)i].GetAspect<PlayerAspect>();
+                if (player.readTeam == this.teams[(int)(teamId - 1u)]) {
+                    return player;
+                }
+            }
+            return default;
         }
 
     }

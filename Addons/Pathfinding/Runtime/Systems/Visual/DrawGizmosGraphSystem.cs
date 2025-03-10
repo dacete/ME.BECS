@@ -1,7 +1,14 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
+
 namespace ME.BECS.Pathfinding {
     
     using BURST = Unity.Burst.BurstCompileAttribute;
-    using Unity.Mathematics;
     using Unity.Collections;
 
     [UnityEngine.Tooltip("Draw graph in gizmos.")]
@@ -18,21 +25,27 @@ namespace ME.BECS.Pathfinding {
             
             if (UnityEngine.Input.GetKeyDown(UnityEngine.KeyCode.O) == true) {
                 ++this.drawIndex;
-                if (this.drawIndex >= context.world.GetSystem<BuildGraphSystem>().graphs.Length) {
+                if (this.drawIndex >= context.world.parent.GetSystem<BuildGraphSystem>().graphs.Length) {
                     this.drawIndex = 0;
                 }
 
-                UnityEngine.Debug.Log("Draw: " + this.drawIndex + "/" + context.world.GetSystem<BuildGraphSystem>().graphs.Length);
+                UnityEngine.Debug.Log("Draw: " + this.drawIndex + "/" + context.world.parent.GetSystem<BuildGraphSystem>().graphs.Length);
             }
             
         }
 
         public void OnDrawGizmos(ref SystemContext context) {
 
+            var logicWorld = context.world.parent;
+            E.IS_CREATED(logicWorld);
+            
+            if (logicWorld.isCreated == false) return;
+            
             Ent drawGraphEnt = default;
             var idx = 0;
-            foreach (var graphEnt in context.world.GetSystem<BuildGraphSystem>().graphs) {
-
+            for (uint i = 0u; i < logicWorld.GetSystem<BuildGraphSystem>().graphs.Length; ++i) {
+                
+                Ent graphEnt = logicWorld.GetSystem<BuildGraphSystem>().graphs[logicWorld.state, i];
                 if (this.drawIndex == idx) {
 
                     drawGraphEnt = graphEnt;
@@ -45,8 +58,8 @@ namespace ME.BECS.Pathfinding {
             }
 
             if (this.drawPath == true) {
-
-                var arr = API.Query(in context).With<ME.BECS.Units.CommandGroupComponent>().ToArray();
+                
+                var arr = API.Query(in logicWorld, context.dependsOn).With<ME.BECS.Units.CommandGroupComponent>().ToArray();
                 foreach (var group in arr) {
 
                     var groupAspect = group.GetAspect<ME.BECS.Units.UnitCommandGroupAspect>();
@@ -60,12 +73,12 @@ namespace ME.BECS.Pathfinding {
                         if (targetComponent.graphEnt != drawGraphEnt) continue;
                         
                         var path = target.Read<TargetPathComponent>().path;
-                        Graph.DrawGizmos(path, new Graph.GizmosParameters() { drawNormals = this.drawNormals });
+                        Graph.DrawGizmos(path, new Graph.GizmosParameters() { drawNormals = this.drawNormals, });
                         
                         UnityEngine.Gizmos.color = UnityEngine.Color.yellow;
-                        UnityEngine.Gizmos.DrawWireSphere(target.Read<TargetPathComponent>().path.to, math.sqrt(PathUtils.GetGroupRadiusSqr(in groupAspect)));
+                        UnityEngine.Gizmos.DrawWireSphere((UnityEngine.Vector3)target.Read<TargetPathComponent>().path.to, (float)math.sqrt(PathUtils.GetGroupRadiusSqr(in groupAspect)));
                         UnityEngine.Gizmos.color = UnityEngine.Color.cyan;
-                        UnityEngine.Gizmos.DrawWireSphere(target.Read<TargetPathComponent>().path.to, math.sqrt(PathUtils.GetTargetRadiusSqr(in targetComponent)));
+                        UnityEngine.Gizmos.DrawWireSphere((UnityEngine.Vector3)target.Read<TargetPathComponent>().path.to, (float)math.sqrt(PathUtils.GetTargetRadiusSqr(in targetComponent)));
 
                     }
 

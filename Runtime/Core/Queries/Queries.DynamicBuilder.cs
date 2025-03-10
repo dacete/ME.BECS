@@ -6,17 +6,19 @@ namespace ME.BECS {
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using BURST = Unity.Burst.BurstCompileAttribute;
     using Jobs;
+    using Unity.Jobs.LowLevel.Unsafe;
+    using Unity.Collections;
     
     public unsafe struct QueryData {
 
         internal TempBitArray archetypesBits;
-        internal uint* archetypes;
+        internal safe_ptr<uint> archetypes;
         internal uint archetypesCount;
         internal uint steps;
         internal uint minElementsPerStep;
 
         public void Dispose() {
-            if (this.archetypesBits.isCreated == true) this.archetypesBits.Dispose();
+            if (this.archetypesBits.IsCreated == true) this.archetypesBits.Dispose();
             this = default;
         }
 
@@ -25,30 +27,36 @@ namespace ME.BECS {
     [BURST(CompileSynchronously = true)]
     public unsafe ref struct QueryBuilder {
         
-        internal CommandBuffer* commandBuffer;
-        internal QueryData* queryData;
+        internal safe_ptr<CommandBuffer> commandBuffer;
+        internal safe_ptr<QueryData> queryData;
         internal uint parallelForBatch;
+        internal JobHandle builderDependsOn;
+        internal Allocator allocator;
         private bool withBurst;
         private bool asJob;
-        internal JobHandle builderDependsOn;
+        internal ScheduleMode scheduleMode;
+        internal bool isUnsafe;
+        internal bool isReadonly;
         internal bool isCreated;
-        public ushort WorldId => this.commandBuffer->worldId;
+        
+        public ushort WorldId => this.commandBuffer.ptr->worldId;
 
         [BURST(CompileSynchronously = true)]
         private struct DisposeJob : IJob {
 
             [NativeDisableUnsafePtrRestriction]
-            public QueryData* queryData;
+            public safe_ptr<QueryData> queryData;
             [NativeDisableUnsafePtrRestriction]
-            public CommandBuffer* commandBuffer;
+            public safe_ptr<CommandBuffer> commandBuffer;
+            public Allocator allocator;
 
             public void Execute() {
                 
-                this.queryData->Dispose();
-                _free(ref this.queryData);
+                this.queryData.ptr->Dispose();
+                _free(this.queryData, this.allocator);
                 
-                this.commandBuffer->Dispose();
-                _free(ref this.commandBuffer);
+                this.commandBuffer.ptr->Dispose();
+                _free(this.commandBuffer, this.allocator);
 
             }
 
@@ -64,10 +72,10 @@ namespace ME.BECS {
         public void Dispose() {
             E.IS_CREATED(this);
             this.builderDependsOn.Complete();
-            this.queryData->Dispose();
-            _free(ref this.queryData);
-            this.commandBuffer->Dispose();
-            _free(ref this.commandBuffer);
+            this.queryData.ptr->Dispose();
+            _free(this.queryData, this.allocator);
+            this.commandBuffer.ptr->Dispose();
+            _free(this.commandBuffer, this.allocator);
             this = default;
         }
 
@@ -77,6 +85,7 @@ namespace ME.BECS {
             var job = new DisposeJob() {
                 queryData = this.queryData,
                 commandBuffer = this.commandBuffer,
+                allocator = this.allocator,
             };
             return job.Schedule(handle);
         }
@@ -84,11 +93,41 @@ namespace ME.BECS {
         [INLINE(256)]
         public QueryBuilder Step(uint steps, uint minElementsPerStep) {
             E.IS_CREATED(this);
-            this.queryData->steps = steps;
-            this.queryData->minElementsPerStep = minElementsPerStep;
+            this.queryData.ptr->steps = steps;
+            this.queryData.ptr->minElementsPerStep = minElementsPerStep;
             return this;
         }
-        
+
+        /// <summary>
+        /// Disable components safety restriction
+        /// </summary>
+        /// <returns></returns>
+        [INLINE(256)]
+        public QueryBuilder AsUnsafe() {
+            E.IS_CREATED(this);
+            E.QUERY_BUILDER_IS_UNSAFE(this.isUnsafe);
+            this.isUnsafe = true;
+            return this;
+        }
+
+        /// <summary>
+        /// Run readonly filter schedule
+        /// </summary>
+        /// <returns></returns>
+        [INLINE(256)]
+        public QueryBuilder AsReadonly() {
+            E.IS_CREATED(this);
+            this.isReadonly = true;
+            return this;
+        }
+
+        [INLINE(256)]
+        public QueryBuilder AsParallel() {
+            E.IS_CREATED(this);
+            this.scheduleMode = ScheduleMode.Parallel;
+            return this;
+        }
+
         [INLINE(256)]
         public QueryBuilder ParallelFor(uint batch) {
             E.IS_CREATED(this);
@@ -112,18 +151,19 @@ namespace ME.BECS {
             return this;
         }
         
+        
         [INLINE(256)]
-        public QueryBuilder WithAll<T0, T1>() where T0 : unmanaged, IComponent
-                                              where T1 : unmanaged, IComponent {
+        public QueryBuilder WithAll<T0, T1>() where T0 : unmanaged, IComponentBase
+                                              where T1 : unmanaged, IComponentBase {
             this.With<T0>();
             this.With<T1>();
             return this;
         }
 
         [INLINE(256)]
-        public QueryBuilder WithAll<T0, T1, T2>() where T0 : unmanaged, IComponent
-                                                  where T1 : unmanaged, IComponent
-                                                  where T2 : unmanaged, IComponent {
+        public QueryBuilder WithAll<T0, T1, T2>() where T0 : unmanaged, IComponentBase
+                                                  where T1 : unmanaged, IComponentBase
+                                                  where T2 : unmanaged, IComponentBase {
             this.With<T0>();
             this.With<T1>();
             this.With<T2>();
@@ -131,10 +171,10 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public QueryBuilder WithAll<T0, T1, T2, T3>() where T0 : unmanaged, IComponent
-                                                      where T1 : unmanaged, IComponent
-                                                      where T2 : unmanaged, IComponent
-                                                      where T3 : unmanaged, IComponent {
+        public QueryBuilder WithAll<T0, T1, T2, T3>() where T0 : unmanaged, IComponentBase
+                                                      where T1 : unmanaged, IComponentBase
+                                                      where T2 : unmanaged, IComponentBase
+                                                      where T3 : unmanaged, IComponentBase {
             this.With<T0>();
             this.With<T1>();
             this.With<T2>();
@@ -143,73 +183,53 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public QueryBuilder WithAny<T0, T1>() where T0 : unmanaged, IComponent
-                                              where T1 : unmanaged, IComponent {
+        public QueryBuilder WithAny<T0, T1>() where T0 : unmanaged, IComponentBase
+                                              where T1 : unmanaged, IComponentBase {
             E.IS_CREATED(this);
-            if (this.builderDependsOn.IsCompleted == true) {
-                ArchetypeQueries.WithAnySync<T0, T1, TNull, TNull>(ref this);
-            } else {
-                this.builderDependsOn = ArchetypeQueries.WithAny<T0, T1, TNull, TNull>(ref this);
-            }
+            this.builderDependsOn = ArchetypeQueries.WithAny<T0, T1, TNull, TNull>(ref this);
             return this;
         }
 
         [INLINE(256)]
-        public QueryBuilder WithAny<T0, T1, T2>() where T0 : unmanaged, IComponent
-                                                  where T1 : unmanaged, IComponent
-                                                  where T2 : unmanaged, IComponent {
+        public QueryBuilder WithAny<T0, T1, T2>() where T0 : unmanaged, IComponentBase
+                                                  where T1 : unmanaged, IComponentBase
+                                                  where T2 : unmanaged, IComponentBase {
             E.IS_CREATED(this);
-            if (this.builderDependsOn.IsCompleted == true) {
-                ArchetypeQueries.WithAnySync<T0, T1, T2, TNull>(ref this);
-            } else {
-                this.builderDependsOn = ArchetypeQueries.WithAny<T0, T1, T2, TNull>(ref this);
-            }
+            this.builderDependsOn = ArchetypeQueries.WithAny<T0, T1, T2, TNull>(ref this);
             return this;
         }
 
         [INLINE(256)]
-        public QueryBuilder WithAny<T0, T1, T2, T3>() where T0 : unmanaged, IComponent 
-                                                      where T1 : unmanaged, IComponent 
-                                                      where T2 : unmanaged, IComponent 
-                                                      where T3 : unmanaged, IComponent {
+        public QueryBuilder WithAny<T0, T1, T2, T3>() where T0 : unmanaged, IComponentBase 
+                                                      where T1 : unmanaged, IComponentBase 
+                                                      where T2 : unmanaged, IComponentBase 
+                                                      where T3 : unmanaged, IComponentBase {
             E.IS_CREATED(this);
-            if (this.builderDependsOn.IsCompleted == true) {
-                ArchetypeQueries.WithAnySync<T0, T1, T2, T3>(ref this);
-            } else {
-                this.builderDependsOn = ArchetypeQueries.WithAny<T0, T1, T2, T3>(ref this);
-            }
+            this.builderDependsOn = ArchetypeQueries.WithAny<T0, T1, T2, T3>(ref this);
             return this;
         }
 
         [INLINE(256)]
-        public QueryBuilder With<T>() where T : unmanaged, IComponent {
+        public QueryBuilder With<T>() where T : unmanaged, IComponentBase {
             E.IS_CREATED(this);
-            if (this.builderDependsOn.IsCompleted == true) {
-                ArchetypeQueries.WithSync<T>(ref this);
-            } else {
-                this.builderDependsOn = ArchetypeQueries.With<T>(ref this);
-            }
+            this.builderDependsOn = ArchetypeQueries.With<T>(ref this);
             return this;
         }
 
         [INLINE(256)]
-        public QueryBuilder Without<T>() where T : unmanaged, IComponent {
+        public QueryBuilder Without<T>() where T : unmanaged, IComponentBase {
             E.IS_CREATED(this);
-            if (this.builderDependsOn.IsCompleted == true) {
-                ArchetypeQueries.WithoutSync<T>(ref this);
-            } else {
-                this.builderDependsOn = ArchetypeQueries.Without<T>(ref this);
-            }
+            this.builderDependsOn = ArchetypeQueries.Without<T>(ref this);
             return this;
         }
 
         [INLINE(256)]
         public QueryBuilder WithAspect<T>() where T : unmanaged, IAspect {
             E.IS_CREATED(this);
-            this.builderDependsOn = ArchetypeQueries.With(ref this, AspectTypeInfo<T>.with);
+            this.builderDependsOn = ArchetypeQueries.With(ref this, AspectTypeInfo.with.Get(AspectTypeInfo<T>.typeId));
             return this;
         }
-
+        
         private struct Job : IJobCommandBuffer {
             public CallbackBurst functionPointer;
             public void Execute(in CommandBufferJob commandBuffer) => this.functionPointer.Invoke(in commandBuffer);
@@ -307,7 +327,7 @@ namespace ME.BECS {
         public JobHandle Schedule<T>(T job) where T : struct, IJobCommandBuffer {
 
             this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
-            this.builderDependsOn = job.Schedule(in this.commandBuffer, this.builderDependsOn);
+            this.builderDependsOn = job.Schedule(in this.commandBuffer.ptr, this.builderDependsOn);
             this.builderDependsOn = this.Dispose(this.builderDependsOn);
             return this.builderDependsOn;
 
@@ -335,7 +355,7 @@ namespace ME.BECS {
         public JobHandle ScheduleParallelFor<T>(T job) where T : struct, IJobParallelForCommandBuffer {
 
             this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
-            this.builderDependsOn = job.Schedule(in this.commandBuffer, this.parallelForBatch, this.builderDependsOn);
+            this.builderDependsOn = job.Schedule(in this.commandBuffer.ptr, this.parallelForBatch, this.builderDependsOn);
             this.builderDependsOn = this.Dispose(this.builderDependsOn);
             return this.builderDependsOn;
 
@@ -377,7 +397,7 @@ namespace ME.BECS {
 
             // Need to complete previous job and run SetEntities in sync mode
             this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
-            this.builderDependsOn = job.Schedule(this.commandBuffer, this.parallelForBatch, this.builderDependsOn);
+            this.builderDependsOn = job.Schedule(this.commandBuffer.ptr, this.parallelForBatch, this.builderDependsOn);
             this.builderDependsOn = this.Dispose(this.builderDependsOn);
             return this.builderDependsOn;
 
@@ -387,16 +407,17 @@ namespace ME.BECS {
         /// [ QUERY END POINT ]
         /// </summary>
         /// <returns></returns>
-        public Unity.Collections.NativeArray<Ent> ToArray(Unity.Collections.Allocator allocator = Unity.Collections.Allocator.Temp) {
+        public Unity.Collections.NativeArray<Ent> ToArray(Unity.Collections.Allocator allocator = Constants.ALLOCATOR_TEMP) {
             
             this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
             this.builderDependsOn.Complete();
-            var cnt = (int)this.commandBuffer->count;
+            var cnt = (int)this.commandBuffer.ptr->count;
             var result = new Unity.Collections.NativeArray<Ent>(cnt, allocator);
             for (int i = 0; i < cnt; ++i) {
-                var entId = this.commandBuffer->entities[i];
-                result[i] = new Ent(entId, Worlds.GetWorld(this.commandBuffer->worldId));
+                var entId = this.commandBuffer.ptr->entities[i];
+                result[i] = new Ent(entId, in Worlds.GetWorld(this.commandBuffer.ptr->worldId));
             }
+            this.Dispose();
             return result;
 
         }
@@ -418,7 +439,7 @@ namespace ME.BECS {
                 // TODO: Exception
             } else {
                 this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
-                this.commandBuffer->sync = true;
+                this.commandBuffer.ptr->sync = true;
                 if (this.withBurst == true) {
                     // wtf?
                     // TODO: Exception
@@ -450,14 +471,14 @@ namespace ME.BECS {
             if (this.parallelForBatch > 0u) {
 
                 this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
-                this.commandBuffer->sync = false;
+                this.commandBuffer.ptr->sync = false;
                 JobHandle jobHandle;
                 if (this.withBurst == true) {
 
                     var job = new JobParallelForBurst() {
                         functionPointer = Callback.Create(forEach, this.withBurst),
                     };
-                    jobHandle = job.Schedule(this.commandBuffer, this.parallelForBatch, this.builderDependsOn);
+                    jobHandle = job.Schedule(this.commandBuffer.ptr, this.parallelForBatch, this.builderDependsOn);
                     handle = job.functionPointer.Dispose(jobHandle);
 
                 } else {
@@ -465,52 +486,52 @@ namespace ME.BECS {
                     var job = new JobParallelFor() {
                         functionPointer = Callback.Create(forEach, this.withBurst),
                     };
-                    jobHandle = job.Schedule(this.commandBuffer, this.parallelForBatch, this.builderDependsOn);
+                    jobHandle = job.Schedule(this.commandBuffer.ptr, this.parallelForBatch, this.builderDependsOn);
                     handle = job.functionPointer.Dispose(jobHandle);
 
                 }
 
+                handle = this.Dispose(handle);
+
             } else {
 
                 this.builderDependsOn = this.SetEntities(this.commandBuffer, this.builderDependsOn);
-                this.commandBuffer->sync = true;
+                this.commandBuffer.ptr->sync = true;
                 if (this.withBurst == true) {
 
                     var job = new JobBurst() {
                         functionPointer = Callback.Create(forEach, this.withBurst),
                     };
-                    var jobHandle = job.Schedule(this.commandBuffer, this.builderDependsOn);
+                    var jobHandle = job.Schedule(this.commandBuffer.ptr, this.builderDependsOn);
                     handle = job.functionPointer.Dispose(jobHandle);
+                    handle = this.Dispose(handle);
 
                 } else if (this.asJob == true) {
                     
                     var job = new Job() {
                         functionPointer = Callback.Create(forEach, this.withBurst),
                     };
-                    var jobHandle = job.Schedule(this.commandBuffer, this.builderDependsOn);
+                    var jobHandle = job.Schedule(this.commandBuffer.ptr, this.builderDependsOn);
                     handle = job.functionPointer.Dispose(jobHandle);
+                    handle = this.Dispose(handle);
 
                 } else {
                     
                     this.WaitForAllJobs();
                     
-                    for (uint i = 0u; i < this.commandBuffer->count; ++i) {
+                    for (uint i = 0u; i < this.commandBuffer.ptr->count; ++i) {
 
-                        var entId = this.commandBuffer->entities[i];
-                        var entGen = this.commandBuffer->state->entities.GetGeneration(this.commandBuffer->state, entId);
+                        var entId = this.commandBuffer.ptr->entities[i];
+                        var entGen = Ents.GetGeneration(this.commandBuffer.ptr->state, entId);
                         var buffer = new CommandBufferJob(entId, entGen, this.commandBuffer);
                         forEach.Invoke(in buffer);
 
                     }
 
+                    this.Dispose();
+
                 }
 
-            }
-
-            if (handle.IsCompleted == false) {
-                handle = this.Dispose(handle);
-            } else {
-                this.Dispose();
             }
 
             this.builderDependsOn = handle;
@@ -521,23 +542,23 @@ namespace ME.BECS {
         private struct FromQueryDataJob : IJob {
 
             [NativeDisableUnsafePtrRestriction]
-            public State* state;
+            public safe_ptr<State> state;
             [NativeDisableUnsafePtrRestriction]
-            public Queries.QueryDataStatic* queryDataStatic;
+            public safe_ptr<Queries.QueryDataStatic> queryDataStatic;
             [NativeDisableUnsafePtrRestriction]
-            public QueryData* queryData;
+            public safe_ptr<QueryData> queryData;
             
             public void Execute() {
                 
-                this.queryData->archetypes = (uint*)this.queryDataStatic->archetypes.GetUnsafePtr(in this.state->allocator);
-                this.queryData->archetypesCount = this.queryDataStatic->archetypes.Count;
+                this.queryData.ptr->archetypes = (safe_ptr<uint>)this.queryDataStatic.ptr->archetypes.GetUnsafePtr(in this.state.ptr->allocator);
+                this.queryData.ptr->archetypesCount = this.queryDataStatic.ptr->archetypes.Count;
                 
             }
 
         }
         
         [INLINE(256)]
-        internal QueryBuilderDisposable FromQueryData(State* state, ushort worldId, Queries.QueryDataStatic* queryDataStatic) {
+        internal QueryBuilderDisposable FromQueryData(safe_ptr<State> state, ushort worldId, safe_ptr<Queries.QueryDataStatic> queryDataStatic) {
 
             //this.queryData = queryDataStatic->GetQueryData(state);
             //this.commandBuffer = queryDataStatic->GetCommandBuffer(state, worldId);
@@ -557,85 +578,88 @@ namespace ME.BECS {
         private struct SetEntitiesJob : IJob {
 
             [NativeDisableUnsafePtrRestriction]
-            public State* state;
+            public safe_ptr<State> state;
             [NativeDisableUnsafePtrRestriction]
-            public CommandBuffer* buffer;
+            public safe_ptr<CommandBuffer> buffer;
             [NativeDisableUnsafePtrRestriction]
-            public QueryData* queryData;
+            public safe_ptr<QueryData> queryData;
+            public Allocator allocator;
 
             public void Execute() {
 
                 {
-                    var archCount = this.queryData->archetypesCount;
-                    // queryData->archetypes are set with static queries only
+                    var archCount = this.queryData.ptr->archetypesCount;
+                    // queryData.ptr->archetypes are set with static queries only
                     // so we need to check if it is null - we have a dynamic query
                     // build archetypes
-                    if (this.queryData->archetypes == null) {
-                        var tempListBits = this.queryData->archetypesBits.GetTrueBitsTemp();
-                        this.queryData->archetypes = tempListBits.Ptr;
+                    if (this.queryData.ptr->archetypes.ptr == null) {
+                        var tempListBits = this.queryData.ptr->archetypesBits.GetTrueBitsTemp();
+                        this.queryData.ptr->archetypes = new safe_ptr<uint>(tempListBits.Ptr, (byte*)tempListBits.Ptr, (byte*)(tempListBits.Ptr + tempListBits.Length));
                         archCount = (uint)tempListBits.Length;
                     }
 
                     if (archCount == 0u) {
-                        this.buffer->entities = null;
-                        this.buffer->count = 0u;
+                        this.buffer.ptr->entities = null;
+                        this.buffer.ptr->count = 0u;
                         return;
                     }
 
-                    var archs = this.queryData->archetypes;
-                    uint* arrPtr = null;
+                    var archs = this.queryData.ptr->archetypes;
+                    safe_ptr<uint> arrPtr = default;
                     var elementsCount = 0u;
-                    if (this.queryData->steps > 0u) {
+                    if (this.queryData.ptr->steps > 0u) {
 
-                        var currentStep = this.state->tick;
+                        var currentStep = this.state.ptr->tick;
                         var temp = new UnsafeList<uint>((int)archCount, Constants.ALLOCATOR_TEMP);
 
                         for (uint i = 0u; i < archCount; ++i) {
                             var archIdx = archs[i];
-                            ref var arch = ref this.state->archetypes.list[in this.state->allocator, archIdx];
-                            temp.AddRange(arch.entitiesList.GetUnsafePtr(in this.state->allocator), (int)arch.entitiesList.Count);
+                            ref var arch = ref this.state.ptr->archetypes.list[in this.state.ptr->allocator, archIdx];
+                            temp.AddRange(arch.entitiesList.GetUnsafePtr(in this.state.ptr->allocator).ptr, (int)arch.entitiesList.Count);
                         }
 
-                        var steps = this.queryData->steps;
+                        var steps = this.queryData.ptr->steps;
                         var count = (uint)temp.Length;
                         if (count > 0u) {
                             var elementsPerStep = count / steps;
-                            if (elementsPerStep < this.queryData->minElementsPerStep) elementsPerStep = this.queryData->minElementsPerStep;
+                            if (elementsPerStep < this.queryData.ptr->minElementsPerStep) elementsPerStep = this.queryData.ptr->minElementsPerStep;
                             steps = (uint)System.Math.Ceiling((count / (double)elementsPerStep));
                             var fromIdx = (uint)(currentStep % steps) * elementsPerStep;
                             var toIdx = fromIdx + elementsPerStep;
                             if (toIdx > count) toIdx = count;
                             // Add range fromIdx..toIdx
                             var size = toIdx - fromIdx;
-                            arrPtr = _makeArray<uint>(size);
-                            _memcpy(temp.Ptr + fromIdx, arrPtr, TSize<uint>.sizeInt * (int)size);
+                            arrPtr = _makeArray<uint>(size, this.allocator);
+                            if (size > 0u) _memcpy((safe_ptr)(temp.Ptr + fromIdx), (safe_ptr)arrPtr, TSize<uint>.size * size);
                             elementsCount += size;
                         }
+
+                        temp.Dispose();
 
                     } else {
 
                         for (uint i = 0u; i < archCount; ++i) {
                             var archIdx = archs[i];
-                            ref var arch = ref this.state->archetypes.list[in this.state->allocator, archIdx];
+                            ref var arch = ref this.state.ptr->archetypes.list[in this.state.ptr->allocator, archIdx];
                             elementsCount += arch.entitiesList.Count;
                         }
 
                         if (elementsCount > 0u) {
-                            arrPtr = _makeArray<uint>(elementsCount);
+                            arrPtr = _makeArray<uint>(elementsCount, this.allocator);
                             var k = 0u;
                             for (uint i = 0u; i < archCount; ++i) {
                                 var archIdx = archs[i];
-                                ref var arch = ref this.state->archetypes.list[in this.state->allocator, archIdx];
-                                _memcpy(arch.entitiesList.GetUnsafePtr(in this.state->allocator), arrPtr + k, TSize<uint>.size * arch.entitiesList.Count);
+                                ref var arch = ref this.state.ptr->archetypes.list[in this.state.ptr->allocator, archIdx];
+                                if (arch.entitiesList.Count > 0u) _memcpy(arch.entitiesList.GetUnsafePtr(in this.state.ptr->allocator), arrPtr + k, TSize<uint>.size * arch.entitiesList.Count);
                                 k += arch.entitiesList.Count;
                             }
                         }
 
                     }
 
-                    if (elementsCount > 0u) Unity.Collections.NativeSortExtension.Sort(arrPtr, (int)elementsCount);
-                    this.buffer->entities = arrPtr;
-                    this.buffer->count = elementsCount;
+                    if (elementsCount > 0u) Unity.Collections.NativeSortExtension.Sort(arrPtr.ptr, (int)elementsCount);
+                    this.buffer.ptr->entities = arrPtr.ptr;
+                    this.buffer.ptr->count = elementsCount;
                 }
                 
             }
@@ -643,12 +667,14 @@ namespace ME.BECS {
         }
         
         [INLINE(256)]
-        internal JobHandle SetEntities(CommandBuffer* buffer, JobHandle dependsOn) {
+        internal JobHandle SetEntities(safe_ptr<CommandBuffer> buffer, JobHandle dependsOn) {
 
+            var allocator = WorldsTempAllocator.allocatorTemp.Get(this.WorldId).Allocator.ToAllocator;
             var job = new SetEntitiesJob() {
                 buffer = buffer,
                 queryData = this.queryData,
-                state = buffer->state,
+                state = buffer.ptr->state,
+                allocator = allocator,
             };
             return job.Schedule(dependsOn);
             
@@ -657,13 +683,13 @@ namespace ME.BECS {
         public struct Enumerator : System.Collections.Generic.IEnumerator<Ent> {
 
             public QueryBuilderDispose queryBuilder;
-            public CommandBuffer* commandBuffer;
+            public safe_ptr<CommandBuffer> commandBuffer;
             public uint index;
             public ushort worldId;
             
-            public bool MoveNext() => this.index++ < this.commandBuffer->count;
+            public bool MoveNext() => this.index++ < this.commandBuffer.ptr->count;
 
-            public Ent Current => new Ent(this.commandBuffer->entities[this.index - 1u], this.commandBuffer->state, this.worldId);
+            public Ent Current => new Ent(this.commandBuffer.ptr->entities[this.index - 1u], this.commandBuffer.ptr->state, this.worldId);
 
             object System.Collections.IEnumerator.Current => this.Current;
 
@@ -681,8 +707,8 @@ namespace ME.BECS {
 
     public unsafe struct QueryBuilderDispose {
 
-        private CommandBuffer* commandBuffer;
-        private QueryData* queryData;
+        private safe_ptr<CommandBuffer> commandBuffer;
+        private safe_ptr<QueryData> queryData;
         private JobHandle builderDependsOn;
         internal readonly bool isCreated;
 
@@ -698,9 +724,9 @@ namespace ME.BECS {
         public void Dispose() {
             E.IS_CREATED(this);
             this.builderDependsOn.Complete();
-            this.queryData->Dispose();
+            this.queryData.ptr->Dispose();
             _free(ref this.queryData);
-            this.commandBuffer->Dispose();
+            this.commandBuffer.ptr->Dispose();
             _free(ref this.commandBuffer);
             this = default;
         }

@@ -4,22 +4,21 @@ namespace ME.BECS {
     
     public interface IIsCreated {
 
-        bool isCreated { get; }
+        bool IsCreated { get; }
 
     }
 
     public interface IUnmanagedList : IIsCreated {
 
         object[] ToManagedArray();
+        Ent Ent { get; }
+        uint GetConfigId();
 
     }
-    
-    public interface IEquatableAllocator<T> {
 
-        bool Equals(in MemoryAllocator allocator, T obj);
-        int GetHash(in MemoryAllocator allocator);
+    public interface IMemArray { }
 
-    }
+    public interface IMemList { }
 
     public enum InsertionBehavior {
 

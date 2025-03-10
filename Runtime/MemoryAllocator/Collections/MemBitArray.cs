@@ -1,7 +1,18 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+using Rect = ME.BECS.FixedPoint.Rect;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+using Rect = UnityEngine.Rect;
+#endif
+
 namespace ME.BECS {
 
     using Unity.Collections;
-    using Unity.Mathematics;
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
 
     internal unsafe struct Bitwise {
@@ -31,7 +42,7 @@ namespace ME.BECS {
         public static uint AlignULongBits(uint bitsCount) {
             var delta = bitsCount % 64u;
             if (delta < 64u && delta > 0u) bitsCount += 64u - delta;
-            return bitsCount / 8;
+            return bitsCount / 8u;
         }
         
         [INLINE(256)]
@@ -110,7 +121,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        private static int FindUlong(ulong* ptr, int beginBit, int endBit, int numBits) {
+        private static int FindUlong(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
             var bits = ptr;
             var numSteps = (numBits + 63) >> 6;
             var numBitsPerStep = 64;
@@ -155,8 +166,8 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        private static int FindUint(ulong* ptr, int beginBit, int endBit, int numBits) {
-            var bits = (uint*)ptr;
+        private static int FindUint(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
+            var bits = ptr.Cast<uint>();
             var numSteps = (numBits + 31) >> 5;
             var numBitsPerStep = 32;
             var maxBits = numSteps * numBitsPerStep;
@@ -200,8 +211,8 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        private static int FindUshort(ulong* ptr, int beginBit, int endBit, int numBits) {
-            var bits = (ushort*)ptr;
+        private static int FindUshort(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
+            var bits = ptr.Cast<ushort>();
             var numSteps = (numBits + 15) >> 4;
             var numBitsPerStep = 16;
             var maxBits = numSteps * numBitsPerStep;
@@ -245,8 +256,8 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        private static int FindByte(ulong* ptr, int beginBit, int endBit, int numBits) {
-            var bits = (byte*)ptr;
+        private static int FindByte(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
+            var bits = ptr.Cast<byte>();
             var numSteps = (numBits + 7) >> 3;
             var numBitsPerStep = 8;
             var maxBits = numSteps * numBitsPerStep;
@@ -290,8 +301,8 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        private static int FindUpto14bits(ulong* ptr, int beginBit, int endBit, int numBits) {
-            var bits = (byte*)ptr;
+        private static int FindUpto14bits(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
+            var bits = ptr.Cast<byte>();
 
             var bit = (byte)(beginBit & 7);
             var beginMask = (byte)~(0xff << bit);
@@ -327,8 +338,8 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        private static int FindUpto6bits(ulong* ptr, int beginBit, int endBit, int numBits) {
-            var bits = (byte*)ptr;
+        private static int FindUpto6bits(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
+            var bits = ptr.Cast<byte>();
 
             var beginMask = (byte)~(0xff << (beginBit & 7));
             var endMask = (byte)~(0xff >> ((8 - (endBit & 7)) & 7));
@@ -362,7 +373,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        internal static int FindWithBeginEnd(ulong* ptr, int beginBit, int endBit, int numBits) {
+        internal static int FindWithBeginEnd(safe_ptr<ulong> ptr, int beginBit, int endBit, int numBits) {
             int idx;
 
             if (numBits >= 127) {
@@ -424,7 +435,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        internal static int Find(ulong* ptr, int pos, int count, int numBits) {
+        internal static int Find(safe_ptr<ulong> ptr, int pos, int count, int numBits) {
             var v = Bitwise.FindWithBeginEnd(ptr, pos, pos + count, numBits);
             if (v == int.MaxValue) return -1;
             return v;
@@ -453,7 +464,6 @@ namespace ME.BECS {
         /// Initializes and returns an instance of UnsafeBitArray which aliases an existing buffer.
         /// </summary>
         /// <param name="ptr">An existing buffer.</param>
-        /// <param name="allocator">The allocator that was used to allocate the bytes. Needed to dispose this array.</param>
         /// <param name="sizeInBytes">The number of bytes. The length will be `sizeInBytes * 8`.</param>
         [INLINE(256)]
         public MemBitArray(MemPtr ptr, int sizeInBytes) {
@@ -470,7 +480,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public MemBitArray(ref MemoryAllocator allocator, int numBits, ClearOptions options = ClearOptions.ClearMemory) {
             var sizeInBytes = Bitwise.AlignUp(numBits, 64) / 8;
-            this.ptr = MemoryAllocatorExt.Alloc(ref allocator, sizeInBytes); //(ulong*)Memory.Unmanaged.Allocate(sizeInBytes, 16, allocator);
+            this.ptr = allocator.Alloc(sizeInBytes); //(ulong*)Memory.Unmanaged.Allocate(sizeInBytes, 16, allocator);
             this.Length = numBits;
 
             if (options == ClearOptions.ClearMemory) {
@@ -521,11 +531,12 @@ namespace ME.BECS {
         /// <summary>
         /// Sets the bit at an index to 0 or 1.
         /// </summary>
+        /// <param name="allocator"></param>
         /// <param name="pos">Index of the bit to set.</param>
         /// <param name="value">True for 1, false for 0.</param>
         [INLINE(256)]
         public void Set(in MemoryAllocator allocator, int pos, bool value) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var idx = pos >> 6;
             var shift = pos & 0x3f;
             var mask = 1ul << shift;
@@ -554,13 +565,14 @@ namespace ME.BECS {
         /// The range runs from index `pos` up to (but not including) `pos + numBits`.
         /// No exception is thrown if `pos + numBits` exceeds the length.
         /// </remarks>
+        /// <param name="allocator"></param>
         /// <param name="pos">Index of the first bit to set.</param>
         /// <param name="value">True for 1, false for 0.</param>
         /// <param name="numBits">Number of bits to set.</param>
         /// <exception cref="System.ArgumentException">Thrown if pos is out of bounds or if numBits is less than 1.</exception>
         [INLINE(256)]
         public void SetBits(in MemoryAllocator allocator, int pos, bool value, int numBits) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var end = math.min(pos + numBits, (int)this.Length);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
@@ -597,17 +609,18 @@ namespace ME.BECS {
         /// <remarks>
         /// The destination bits in this array run from index `pos` up to (but not including) `pos + numBits`.
         /// No exception is thrown if `pos + numBits` exceeds the length.
-        ///
+        /// 
         /// The lowest bit of the ulong is copied to the first destination bit; the second-lowest bit of the ulong is
         /// copied to the second destination bit; and so forth.
         /// </remarks>
+        /// <param name="allocator"></param>
         /// <param name="pos">Index of the first bit to set.</param>
         /// <param name="value">Unsigned long from which to copy bits.</param>
         /// <param name="numBits">Number of bits to set (must be between 1 and 64).</param>
         /// <exception cref="System.ArgumentException">Thrown if pos is out of bounds or if numBits is not between 1 and 64.</exception>
         [INLINE(256)]
         public void SetBits(in MemoryAllocator allocator, int pos, ulong value, int numBits = 1) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
 
@@ -636,16 +649,17 @@ namespace ME.BECS {
         /// <remarks>
         /// The source bits in this array run from index `pos` up to (but not including) `pos + numBits`.
         /// No exception is thrown if `pos + numBits` exceeds the length.
-        ///
+        /// 
         /// The first source bit is copied to the lowest bit of the ulong; the second source bit is copied to the second-lowest bit of the ulong; and so forth. Any remaining bits in the ulong will be 0.
         /// </remarks>
+        /// <param name="allocator"></param>
         /// <param name="pos">Index of the first bit to get.</param>
         /// <param name="numBits">Number of bits to get (must be between 1 and 64).</param>
         /// <exception cref="System.ArgumentException">Thrown if pos is out of bounds or if numBits is not between 1 and 64.</exception>
         /// <returns>A ulong which has bits copied from this array.</returns>
         [INLINE(256)]
         public ulong GetBits(in MemoryAllocator allocator, int pos, int numBits = 1) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
 
@@ -670,12 +684,13 @@ namespace ME.BECS {
         /// <summary>
         /// Returns true if the bit at an index is 1.
         /// </summary>
+        /// <param name="allocator"></param>
         /// <param name="pos">Index of the bit to test.</param>
         /// <returns>True if the bit at the index is 1.</returns>
         /// <exception cref="System.ArgumentException">Thrown if `pos` is out of bounds.</exception>
         [INLINE(256)]
         public bool IsSet(in MemoryAllocator allocator, int pos) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var idx = pos >> 6;
             var shift = pos & 0x3f;
             var mask = 1ul << shift;
@@ -693,9 +708,10 @@ namespace ME.BECS {
         /// <remarks>
         /// The bits to copy run from index `srcPos` up to (but not including) `srcPos + numBits`.
         /// The bits to set run from index `dstPos` up to (but not including) `dstPos + numBits`.
-        ///
+        /// 
         /// The ranges may overlap, but the result in the overlapping region is undefined.
         /// </remarks>
+        /// <param name="allocator"></param>
         /// <param name="dstPos">Index of the first bit to set.</param>
         /// <param name="srcPos">Index of the first bit to copy.</param>
         /// <param name="numBits">Number of bits to copy.</param>
@@ -715,9 +731,10 @@ namespace ME.BECS {
         /// <remarks>
         /// The bits to copy in the source array run from index srcPos up to (but not including) `srcPos + numBits`.
         /// The bits to set in the destination array run from index dstPos up to (but not including) `dstPos + numBits`.
-        ///
+        /// 
         /// It's fine if source and destination array are one and the same, even if the ranges overlap, but the result in the overlapping region is undefined.
         /// </remarks>
+        /// <param name="allocator"></param>
         /// <param name="dstPos">Index of the first bit to set.</param>
         /// <param name="srcBitArray">The source array.</param>
         /// <param name="srcPos">Index of the first bit to copy.</param>
@@ -725,7 +742,7 @@ namespace ME.BECS {
         /// <exception cref="System.ArgumentException">Thrown if either `dstPos + numBits` or `srcBitArray + numBits` exceed the length of this array.</exception>
         [INLINE(256)]
         public void Copy(in MemoryAllocator allocator, int dstPos, ref MemBitArray srcBitArray, int srcPos, int numBits) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             if (numBits == 0) {
                 return;
             }
@@ -794,7 +811,7 @@ namespace ME.BECS {
         /// <returns>The index of the first occurrence in this array of `numBits` contiguous 0 bits. Range is pos up to (but not including) the length of this array. Returns -1 if no occurrence is found.</returns>
         [INLINE(256)]
         public int Find(in MemoryAllocator allocator, int pos, int numBits) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var count = this.Length - pos;
             return Bitwise.Find(ptr, pos, count, numBits);
         }
@@ -809,7 +826,7 @@ namespace ME.BECS {
         /// <returns>The index of the first occurrence in this array of `numBits` contiguous 0 bits. Range is pos up to (but not including) `pos + count`. Returns -1 if no occurrence is found.</returns>
         [INLINE(256)]
         public int Find(in MemoryAllocator allocator, int pos, int count, int numBits) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             return Bitwise.Find(ptr, pos, count, numBits);
         }
 
@@ -822,7 +839,7 @@ namespace ME.BECS {
         /// <exception cref="System.ArgumentException">Thrown if `pos` is out of bounds or `numBits` is less than 1.</exception>
         [INLINE(256)]
         public bool TestNone(in MemoryAllocator allocator, int pos, int numBits = 1) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var end = math.min(pos + numBits, this.Length);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
@@ -858,7 +875,7 @@ namespace ME.BECS {
         /// <exception cref="System.ArgumentException">Thrown if `pos` is out of bounds or `numBits` is less than 1.</exception>
         [INLINE(256)]
         public bool TestAny(in MemoryAllocator allocator, int pos, int numBits = 1) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var end = math.min(pos + numBits, this.Length);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
@@ -894,7 +911,7 @@ namespace ME.BECS {
         /// <exception cref="System.ArgumentException">Thrown if `pos` is out of bounds or `numBits` is less than 1.</exception>
         [INLINE(256)]
         public bool TestAll(in MemoryAllocator allocator, int pos, int numBits = 1) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var end = math.min(pos + numBits, this.Length);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
@@ -930,7 +947,7 @@ namespace ME.BECS {
         /// <exception cref="System.ArgumentException">Thrown if `pos` is out of bounds or `numBits` is less than 1.</exception>
         [INLINE(256)]
         public int CountBits(in MemoryAllocator allocator, int pos, int numBits = 1) {
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, in this.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(in this.ptr);
             var end = math.min(pos + numBits, this.Length);
             var idxB = pos >> 6;
             var shiftB = pos & 0x3f;
@@ -958,36 +975,14 @@ namespace ME.BECS {
         [INLINE(256)]
         public void RemoveExcept(in MemoryAllocator allocator, MemBitArray bits) {
 
-            var p = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, this.ptr);
-            var p2 = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, bits.ptr);
+            var p = (safe_ptr<ulong>)allocator.GetUnsafePtr(this.ptr);
+            var p2 = (safe_ptr<ulong>)allocator.GetUnsafePtr(bits.ptr);
             var length = this.Length / 64;
             for (int i = 0; i < length; ++i) {
                 var val2 = p2[i];
                 p[i] &= val2;
             }
 
-        }
-
-    }
-
-    internal sealed unsafe class UnsafeBitArrayDebugView {
-
-        private MemBitArray Data;
-
-        public UnsafeBitArrayDebugView(MemBitArray data) {
-            this.Data = data;
-        }
-
-        public bool[] Bits {
-            get {
-                var allocator = Context.world.state->allocator;
-                var array = new bool[this.Data.Length];
-                for (var i = 0; i < this.Data.Length; ++i) {
-                    array[i] = this.Data.IsSet(in allocator, i);
-                }
-
-                return array;
-            }
         }
 
     }

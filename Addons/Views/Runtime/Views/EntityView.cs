@@ -49,23 +49,30 @@ namespace ME.BECS.Views {
         [SerializeField]
         protected internal IViewModule[] viewModules = System.Array.Empty<IViewModule>();
 
-        [SerializeField]
+        [SerializeField][HideInInspector]
         internal int[] initializeModules;
-        [SerializeField]
+        [SerializeField][HideInInspector]
         internal int[] deInitializeModules;
-        [SerializeField]
+        [SerializeField][HideInInspector]
         internal int[] enableFromPoolModules;
-        [SerializeField]
+        [SerializeField][HideInInspector]
         internal int[] disableToPoolModules;
-        [SerializeField]
+        [SerializeField][HideInInspector]
         internal int[] applyStateModules;
-        [SerializeField]
+        [SerializeField][HideInInspector]
         internal int[] updateModules;
 
         public CullingType cullingType;
         public GroupChangedTracker groupChangedTracker;
         public ViewRoot rootInfo;
         public EntRO ent;
+
+        public T GetModule<T>() where T : IViewModule {
+            foreach (var module in this.viewModules) {
+                if (module is T mod) return mod;
+            }
+            return default;
+        }
 
         /// <summary>
         /// Called once when this view creates on scene

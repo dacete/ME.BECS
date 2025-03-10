@@ -9,7 +9,7 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            return world.state->batches.Set(in ent, typeId, data, world.state);
+            return Batches.Set(in ent, typeId, data, world.state);
 
         }
 
@@ -18,7 +18,16 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            return world.state->batches.Remove(in ent, typeId, world.state);
+            return Batches.Remove(in ent, typeId, world.state);
+
+        }
+
+        [INLINE(256)]
+        public static bool SetPtr(in this Ent ent, uint typeId, void* data) {
+
+            E.IS_ALIVE(ent);
+            var world = ent.World;
+            return Batches.Set(in ent, typeId, data, world.state);
 
         }
 
@@ -27,7 +36,7 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            return world.state->batches.Set(in ent, StaticTypes<T>.typeId, data, world.state);
+            return Batches.Set(in ent, StaticTypes<T>.typeId, data, world.state);
 
         }
 
@@ -36,7 +45,16 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            return world.state->batches.GetPtr<T>(in ent, world.state);
+            return Batches.GetPtr<T>(in ent, world.state);
+
+        }
+
+        [INLINE(256)]
+        public static void* ReadPtr(in this Ent ent, uint typeId) {
+
+            E.IS_ALIVE(ent);
+            var world = ent.World;
+            return Components.ReadUnknownType(world.state, typeId, ent.id, ent.gen, out _);
 
         }
 
@@ -45,7 +63,7 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            return world.state->components.ReadPtr<T>(world.state, ent.id, ent.gen);
+            return Components.ReadPtr<T>(world.state, ent.id, ent.gen);
 
         }
 
@@ -54,7 +72,7 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            return world.state->components.ReadPtr<T>(world.state, ent.id, ent.gen, out exists);
+            return Components.ReadPtr<T>(world.state, ent.id, ent.gen, out exists);
 
         }
 
@@ -63,7 +81,7 @@ namespace ME.BECS {
 
             E.IS_ALIVE(ent);
             var world = ent.World;
-            component = world.state->components.ReadPtr<T>(world.state, ent.id, ent.gen, out var exists);
+            component = Components.ReadPtr<T>(world.state, ent.id, ent.gen, out var exists);
             return exists;
 
         }

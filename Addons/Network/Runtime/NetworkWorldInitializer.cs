@@ -8,9 +8,7 @@ namespace ME.BECS.Network {
         public FeaturesGraph.SystemsGraph featuresGraph;
         protected NetworkModule networkModule;
         
-        protected override void Awake() {
-            
-            base.Awake();
+        protected override void DoWorldAwake() {
             
             if (this.featuresGraph == null) {
                 Logger.Features.Error("Graph is null");
@@ -26,22 +24,40 @@ namespace ME.BECS.Network {
             WorldStaticCallbacks.RegisterCallback<ViewsModuleData>(this.ViewsLoad);
             WorldStaticCallbacks.RegisterCallback<ViewsModuleData>(this.OnViewsUpdate, 1);
 
+            this.previousFrameDependsOn = State.SetWorldState(in this.world, WorldState.Initialized, UpdateType.FIXED_UPDATE, this.previousFrameDependsOn);
+            base.DoWorldAwake();
+            
+        }
+
+        protected override void Start() {
+
+            if (this.world.isCreated == true) {
+
+                this.previousFrameDependsOn = State.SetWorldState(in this.world, WorldState.Initialized, UpdateType.FIXED_UPDATE, this.previousFrameDependsOn);
+                base.Start();
+
+            }
+
         }
 
         private unsafe void OnViewsUpdate(ref ViewsModuleData data) {
 
             if (this.networkModule == null) return;
 
-            data.beginFrameState->timeSinceStart = this.networkModule.GetCurrentTime();
-            data.beginFrameState->state = this.networkModule.GetStartFrameState();
+            if (data.connectedWorld.id != this.world.id) return;
+
+            data.beginFrameState.ptr->timeSinceStart = this.networkModule.GetCurrentTime();
+            data.beginFrameState.ptr->state = this.networkModule.GetStartFrameState();
 
         }
 
         private unsafe void ViewsLoad(ref ViewsModuleData data) {
 
             if (this.networkModule == null) return;
+
+            if (data.connectedWorld.id != this.world.id) return;
             
-            data.beginFrameState->tickTime = this.networkModule.properties.tickTime;
+            data.beginFrameState.ptr->tickTime = this.networkModule.properties.tickTime;
 
         }
 
@@ -60,31 +76,36 @@ namespace ME.BECS.Network {
 
         }
 
-        public void FixedUpdate() {
+        public virtual void FixedUpdate() {
             if (this.networkModule is null) {
                 // Use default initializer behaviour if network module not found as FIXED_UPDATE
+                this.previousFrameDependsOn.Complete();
                 this.previousFrameDependsOn = this.DoUpdate(UpdateType.FIXED_UPDATE, this.previousFrameDependsOn);
+                this.previousFrameDependsOn.Complete();
             }
         }
 
-        public void Update() {
+        public virtual void Update() {
             
             //this.previousFrameDependsOn = this.DoUpdate(UpdateType.UPDATE, this.previousFrameDependsOn);
             
             if (this.networkModule is null) {
                 return;
             }
-            
+
             // From here there are some code which overrides default world initializer behaviour
             if (this.world.isCreated == true) {
-
-                var dt = UnityEngine.Time.deltaTime;
+                
+                this.previousFrameDependsOn.Complete();
+                
+                var dt = this.GetDeltaTimeMs();
                 // Update logic - depends on tick time
                 var handle = this.networkModule.UpdateInitializer(dt, this, this.previousFrameDependsOn, ref this.world);
                 handle.Complete();
                 
                 if (this.networkModule.IsInRollback() == false) {
 
+                    this.previousFrameDependsOn = this.world.RaiseEvents(this.previousFrameDependsOn);
                     // Update visual - once per frame
                     this.previousFrameDependsOn = this.OnUpdate(this.previousFrameDependsOn);
                     for (var i = 0; i < this.modules.list.Length; ++i) {
@@ -94,6 +115,9 @@ namespace ME.BECS.Network {
                     }
 
                 }
+                
+                this.previousFrameDependsOn.Complete();
+                
             }
             
         }
@@ -110,6 +134,14 @@ namespace ME.BECS.Network {
 
         }*/
 
+        protected override void OnDestroy() {
+            
+            WorldStaticCallbacks.UnregisterCallback<ViewsModuleData>(this.ViewsLoad);
+            WorldStaticCallbacks.UnregisterCallback<ViewsModuleData>(this.OnViewsUpdate, 1);
+            
+            base.OnDestroy();
+            
+        }
     }
 
 }

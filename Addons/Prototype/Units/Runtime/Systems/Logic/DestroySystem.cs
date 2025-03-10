@@ -11,12 +11,12 @@ namespace ME.BECS.Units {
     public struct DestroySystem : IUpdate {
 
         [BURST(CompileSynchronously = true)]
-        public struct DestroyJob : IJobAspect<UnitAspect> {
+        public struct DestroyJob : IJobForAspects<UnitAspect> {
 
-            public void Execute(in JobInfo jobInfo, ref UnitAspect unit) {
-                if (unit.health <= 0f) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref UnitAspect unit) {
+                if (unit.readHealth <= 0u) {
                     var tr = unit.ent.GetAspect<TransformAspect>();
-                    EffectUtils.CreateEffect(tr.position, tr.rotation, in unit.ent.Read<UnitHealthComponent>().effectOnDestroy, jobInfo);
+                    EffectUtils.CreateEffect(tr.position, tr.rotation, unit.ent.ReadStatic<UnitEffectOnDestroyComponent>().effect, jobInfo);
                     UnitUtils.DestroyUnit(unit);
                 }
             }

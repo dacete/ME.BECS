@@ -1,6 +1,5 @@
 namespace ME.BECS {
 
-    using MemPtr = System.Int64;
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using static Cuts;
 
@@ -10,15 +9,15 @@ namespace ME.BECS {
 
         private MemArray<T> array;
         //private BitArray bits;
-        private uint size;
-        public bool isCreated => this.array.isCreated;
+        private volatile uint size;
+        public bool isCreated => this.array.IsCreated;
 
         public readonly uint Count => this.size;
 
         [INLINE(256)]
-        public JobThreadStack(ref MemoryAllocator allocator, uint capacity, byte growFactor = 1) {
+        public JobThreadStack(ref MemoryAllocator allocator, uint capacity) {
             this = default;
-            this.array = new MemArray<T>(ref allocator, capacity, growFactor: growFactor);
+            this.array = new MemArray<T>(ref allocator, capacity);
             //this.bits = new BitArray(ref allocator, capacity);
         }
 
@@ -34,7 +33,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public void* GetUnsafePtr(in MemoryAllocator allocator) {
+        public safe_ptr GetUnsafePtr(in MemoryAllocator allocator) {
             return this.array.GetUnsafePtr(in allocator);
         }
 
@@ -52,7 +51,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public T Pop(in MemoryAllocator allocator, JobInfo jobInfo) {
+        public T Pop(in MemoryAllocator allocator, in JobInfo jobInfo) {
             /*var offset = jobInfo.Offset;
             while (true) {
                 E.RANGE(offset, 0u, this.size);
@@ -77,7 +76,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public void Push(ref MemoryAllocator allocator, T item) {
             if (this.size == this.array.Length) {
-                this.array.Resize(ref allocator, this.array.Length == 0 ? JobThreadStack<T>.DEFAULT_CAPACITY : 2 * this.array.Length);
+                this.array.Resize(ref allocator, this.array.Length == 0 ? JobThreadStack<T>.DEFAULT_CAPACITY : 2 * this.array.Length, 2);
                 //this.bits.Resize(ref allocator, this.bits.Length == 0 ? JobThreadStack<T>.DEFAULT_CAPACITY : 2 * this.bits.Length);
             }
 
@@ -93,7 +92,7 @@ namespace ME.BECS {
                 this.array.Resize(ref allocator, this.array.Length + delta, growFactor: 1);
             }
 
-            _memcpy(list.GetUnsafePtr(in allocator), (byte*)this.array.GetUnsafePtr(in allocator) + TSize<uint>.size * this.size, TSize<uint>.size * list.Count);
+            _memcpy(list.GetUnsafePtr(in allocator), (safe_ptr<byte>)this.array.GetUnsafePtr(in allocator) + TSize<T>.size * this.size, TSize<T>.size * list.Count);
             this.size += list.Count;
             /*for (uint i = 0; i < list.Count; ++i) {
                 this.Push(ref allocator, list[allocator, i]);

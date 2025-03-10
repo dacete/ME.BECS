@@ -2,11 +2,11 @@
 namespace ME.BECS.Attack {
     
     using BURST = Unity.Burst.BurstCompileAttribute;
-    using ME.BECS.Transforms;
     using ME.BECS.Jobs;
     using ME.BECS.Units;
     using ME.BECS.Pathfinding;
-    using Unity.Mathematics;
+    using ME.BECS.Commands;
+    using ME.BECS.Transforms;
 
     [BURST(CompileSynchronously = true)]
     [UnityEngine.Tooltip("Move unit if it was damaged and is not attacking and without hold")]
@@ -14,22 +14,47 @@ namespace ME.BECS.Attack {
     public struct MoveToAttackerSystem : IUpdate {
 
         [BURST(CompileSynchronously = true)]
-        public struct Job : IJobAspect<UnitAspect, TransformAspect> {
+        public struct MoveToAttackerJob : IJobFor2Aspects1Components<UnitAspect, TransformAspect, DamageTookEvent> {
 
             public BuildGraphSystem buildGraphSystem;
             
-            // TODO: Make this job as parallel
-            // may be we need to group by DamageTookComponent.sourceUnit first?
-            public void Execute(in JobInfo jobInfo, ref UnitAspect unit, ref TransformAspect tr) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref UnitAspect unit, ref TransformAspect transform, ref DamageTookEvent component) {
 
-                var attacker = unit.ent.Read<DamageTookComponent>().sourceUnit;
-                if (attacker.IsAlive() == false) return;
-                
+                if (component.source.IsAlive() == false) return;
+
                 // move to attacker
-                if (AttackUtils.GetPositionToAttack(in unit, in attacker, out var worldPos) == true) {
-                    ME.BECS.Commands.CommandsUtils.SetCommand(in this.buildGraphSystem, in unit, new ME.BECS.Commands.CommandMove() {
+                var result = AttackUtils.GetPositionToAttack(in unit, in component.source, this.buildGraphSystem.GetNodeSize(), out var worldPos);
+                if (result == AttackUtils.PositionToAttack.MoveToPoint) {
+                    CommandsUtils.SetCommand(in this.buildGraphSystem, in unit, new ME.BECS.Commands.CommandMove() {
                         targetPosition = worldPos,
                     }, jobInfo);
+                } else if (result == AttackUtils.PositionToAttack.RotateToTarget) {
+                    unit.ent.Set(new UnitLookAtComponent() {
+                        target = component.source.GetAspect<TransformAspect>().GetWorldMatrixPosition(),
+                    });
+                }
+
+            }
+
+        }
+
+        [BURST(CompileSynchronously = true)]
+        public struct StopOnTargetJob : IJobFor1Aspects1Components<UnitAspect, UnitAttackCommandComponent> {
+
+            public BuildGraphSystem buildGraphSystem;
+
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref UnitAspect unit, ref UnitAttackCommandComponent target) {
+
+                if (target.target.IsAlive() == true && AttackUtils.CanAttack(in unit, in target.target) == true) {
+                    var result = AttackUtils.GetPositionToAttack(in unit, in target.target, this.buildGraphSystem.GetNodeSize(), out var worldPos);
+                    if (result == AttackUtils.PositionToAttack.RotateToTarget) {
+                        // Stop unit to attack
+                        unit.ent.Set(new UnitLookAtComponent() {
+                            target = target.target.GetAspect<TransformAspect>().GetWorldMatrixPosition(),
+                        });
+                    } else {
+                        PathUtils.UpdateTarget(in this.buildGraphSystem, unit.readUnitCommandGroup.GetAspect<UnitCommandGroupAspect>(), in worldPos, in jobInfo);
+                    }
                 }
 
             }
@@ -38,16 +63,21 @@ namespace ME.BECS.Attack {
 
         public void OnUpdate(ref SystemContext context) {
 
-            var dependsOn = context.Query()
-                                   .Without<IsUnitStaticComponent>()
-                                   .Without<PathFollowComponent>()
-                                   .With<DamageTookComponent>()
-                                   .Without<AttackTargetComponent>()
-                                   .Without<UnitHoldComponent>()
-                                   .Schedule<Job, UnitAspect, TransformAspect>(new Job() {
-                                       buildGraphSystem = context.world.GetSystem<BuildGraphSystem>(),
-                                   });
-            context.SetDependency(dependsOn);
+            var buildGraphSystem = context.world.GetSystem<BuildGraphSystem>();
+            var dependsOnMoveToTarget = context.Query()
+                                               .Without<IsUnitStaticComponent>()
+                                               .Without<PathFollowComponent>()
+                                               .Without<AttackTargetComponent>()
+                                               .Without<AttackTargetsComponent>()
+                                               .Without<UnitHoldComponent>()
+                                               .Schedule<MoveToAttackerJob, UnitAspect, TransformAspect, DamageTookEvent>(new MoveToAttackerJob() {
+                                                   buildGraphSystem = context.world.GetSystem<BuildGraphSystem>(),
+                                               });
+            var dependsOnStop = context.Query(dependsOnMoveToTarget)
+                            .Schedule<StopOnTargetJob, UnitAspect, UnitAttackCommandComponent>(new StopOnTargetJob() {
+                                buildGraphSystem = buildGraphSystem,
+                            });
+            context.SetDependency(dependsOnStop);
 
         }
 

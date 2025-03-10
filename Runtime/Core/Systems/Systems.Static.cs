@@ -2,15 +2,32 @@ namespace ME.BECS {
     
     using Unity.Collections.LowLevel.Unsafe;
 
-    public class TSystem<T> where T : unmanaged, ISystem {
+    public class TSystemGraph<T> where T : unmanaged, ISystem {
 
-        public static readonly Unity.Burst.SharedStatic<int> index = Unity.Burst.SharedStatic<int>.GetOrCreate<TSystem<T>>();
+        public static readonly Unity.Burst.SharedStatic<UnsafeHashMap<int, System.IntPtr>> dic = Unity.Burst.SharedStatic<UnsafeHashMap<int, System.IntPtr>>.GetOrCreate<TSystemGraph<T>>();
 
     }
 
-    public class TSystemGraph<T> where T : unmanaged, ISystem {
+    public unsafe class TSystemGraph {
+        
+        public static void Register<T>(int graphId, void* ptr) where T : unmanaged, ISystem {
+            ref var dic = ref TSystemGraph<T>.dic.Data;
+            if (dic.IsCreated == false) dic = new UnsafeHashMap<int, System.IntPtr>(4, Constants.ALLOCATOR_DOMAIN);
+            if (dic.TryGetValue(graphId, out var sysPtr) == false) {
+                dic.Add(graphId, (System.IntPtr)ptr);
+            } else {
+                dic[graphId] = (System.IntPtr)ptr;
+            }
+        }
 
-        public static readonly Unity.Burst.SharedStatic<int> index = Unity.Burst.SharedStatic<int>.GetOrCreate<TSystemGraph<T>>();
+        public static bool GetSystem<T>(int graphId, out T* system) where T : unmanaged, ISystem {
+            system = null;
+            if (TSystemGraph<T>.dic.Data.TryGetValue(graphId, out var ptr) == true) {
+                system = (T*)ptr;
+                return true;
+            }
+            return false;
+        }
 
     }
 
@@ -23,6 +40,12 @@ namespace ME.BECS {
     public class SystemsStaticOnAwake {
 
         public static readonly Unity.Burst.SharedStatic<UnsafeHashMap<int, System.IntPtr>> dic = Unity.Burst.SharedStatic<UnsafeHashMap<int, System.IntPtr>>.GetOrCreate<SystemsStaticOnAwake>();
+
+    }
+
+    public class SystemsStaticOnStart {
+
+        public static readonly Unity.Burst.SharedStatic<UnsafeHashMap<int, System.IntPtr>> dic = Unity.Burst.SharedStatic<UnsafeHashMap<int, System.IntPtr>>.GetOrCreate<SystemsStaticOnStart>();
 
     }
 
@@ -50,18 +73,26 @@ namespace ME.BECS {
 
     }
 
+    public class SystemsStaticPins {
+
+        public static readonly Unity.Burst.SharedStatic<UnsafeList<System.Runtime.InteropServices.GCHandle>> dic = Unity.Burst.SharedStatic<UnsafeList<System.Runtime.InteropServices.GCHandle>>.GetOrCreate<SystemsStaticPins>();
+
+    }
+
     public static unsafe class SystemsStatic {
 
         public delegate void InitializeGraph();
-        public delegate void OnAwake(float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn);
-        public delegate void OnUpdate(float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn);
-        public delegate void OnDestroy(float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn);
-        public delegate void OnDrawGizmos(float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn);
+        public delegate void OnAwake(uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn);
+        public delegate void OnStart(uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn);
+        public delegate void OnUpdate(uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn);
+        public delegate void OnDestroy(uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn);
+        public delegate void OnDrawGizmos(uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn);
         public delegate void GetSystem(int index, out void* ptr);
 
         private static void Register<T>(ref UnsafeHashMap<int, System.IntPtr> registry, T callback, int graphId, bool isBurst) where T : class {
 
             System.IntPtr ptr;
+            var pinnedHandle = System.Runtime.InteropServices.GCHandle.Alloc(callback, System.Runtime.InteropServices.GCHandleType.Pinned);
             if (isBurst == true) {
                 var pointer = Unity.Burst.BurstCompiler.CompileFunctionPointer(callback);
                 ptr = pointer.Value;
@@ -71,10 +102,40 @@ namespace ME.BECS {
             }
             
             if (registry.IsCreated == false) {
-                registry = new UnsafeHashMap<int, System.IntPtr>(10, Constants.ALLOCATOR_PERSISTENT_ST);
+                registry = new UnsafeHashMap<int, System.IntPtr>(10, Constants.ALLOCATOR_DOMAIN);
             }
-            
+
+            if (SystemsStaticPins.dic.Data.IsCreated == false) {
+                SystemsStaticPins.dic.Data = new UnsafeList<System.Runtime.InteropServices.GCHandle>(1, Constants.ALLOCATOR_DOMAIN);
+            }
+
+            SystemsStaticPins.dic.Data.Add(pinnedHandle);
             registry.Add(graphId, ptr);
+
+        }
+
+        public static void Initialize() {
+
+            Dispose();
+
+        }
+        
+        public static void Dispose() {
+
+            if (SystemsStaticPins.dic.Data.IsCreated == true) {
+                foreach (var pin in SystemsStaticPins.dic.Data) {
+                    pin.Free();
+                }
+                SystemsStaticPins.dic.Data.Dispose();
+            }
+
+            SystemsStaticInitialization.dic.Data.Dispose();
+            SystemsStaticGetSystem.dic.Data.Dispose();
+            SystemsStaticOnAwake.dic.Data.Dispose();
+            SystemsStaticOnStart.dic.Data.Dispose();
+            SystemsStaticOnUpdate.dic.Data.Dispose();
+            SystemsStaticOnDrawGizmos.dic.Data.Dispose();
+            SystemsStaticOnDestroy.dic.Data.Dispose();
 
         }
         
@@ -96,6 +157,12 @@ namespace ME.BECS {
 
         }
 
+        public static void RegisterStartMethod(OnStart callback, int graphId, bool isBurst) {
+            
+            Register(ref SystemsStaticOnStart.dic.Data, callback, graphId, isBurst);
+
+        }
+
         public static void RegisterUpdateMethod(OnUpdate callback, int graphId, bool isBurst) {
 
             Register(ref SystemsStaticOnUpdate.dic.Data, callback, graphId, isBurst);
@@ -109,7 +176,7 @@ namespace ME.BECS {
         }
 
         public static void RegisterDestroyMethod(OnDestroy callback, int graphId, bool isBurst) {
-            
+
             Register(ref SystemsStaticOnDestroy.dic.Data, callback, graphId, isBurst);
 
         }
@@ -129,19 +196,19 @@ namespace ME.BECS {
 
         }
 
-        public static bool RaiseOnAwake(in SystemGroup rootGroup, ushort updateType, float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
+        public static bool RaiseOnAwake(in SystemGroup rootGroup, ushort updateType, uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
 
             var result = false;
-            if (rootGroup.rootNode != null) {
-                for (uint i = 0u; i < rootGroup.rootNode->childrenIndex; ++i) {
-                    var child = rootGroup.rootNode->children[i];
-                    if (child.data->graph != null) {
-                        if (updateType == 0 || child.data->graph->updateType == updateType) {
+            if (rootGroup.rootNode.ptr != null) {
+                for (uint i = 0u; i < rootGroup.rootNode.ptr->childrenIndex; ++i) {
+                    var child = rootGroup.rootNode.ptr->children[i];
+                    if (child.data.ptr->graph.ptr != null) {
+                        if (updateType == 0 || child.data.ptr->graph.ptr->updateType == updateType) {
                             
-                            if (SystemsStaticOnAwake.dic.Data.TryGetValue(child.data->graph->graphId, out var ptr) == true) {
+                            if (SystemsStaticOnAwake.dic.Data.TryGetValue(child.data.ptr->graph.ptr->graphId, out var ptr) == true) {
 
                                 var func = new Unity.Burst.FunctionPointer<OnAwake>(ptr);
-                                func.Invoke(dt, ref world, ref dependsOn);
+                                func.Invoke(deltaTimeMs, ref world, ref dependsOn);
                                 result = true;
 
                             }
@@ -155,22 +222,48 @@ namespace ME.BECS {
 
         }
 
-        public static bool RaiseOnUpdate(in SystemGroup rootGroup, ushort updateType, float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
+        public static bool RaiseOnStart(in SystemGroup rootGroup, ushort updateType, uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
 
             var result = false;
-            if (rootGroup.rootNode != null) {
-                //UnityEngine.Debug.Log("RaiseOnUpdate Call: " + rootGroup.rootNode->childrenIndex + ", updateType: " + updateType);
-                for (uint i = 0u; i < rootGroup.rootNode->childrenIndex; ++i) {
-                    var child = rootGroup.rootNode->children[i];
-                    if (child.data->graph != null) {
-                        if (updateType == 0 || child.data->graph->updateType == updateType) {
+            if (rootGroup.rootNode.ptr != null) {
+                for (uint i = 0u; i < rootGroup.rootNode.ptr->childrenIndex; ++i) {
+                    var child = rootGroup.rootNode.ptr->children[i];
+                    if (child.data.ptr->graph.ptr != null) {
+                        if (updateType == 0 || child.data.ptr->graph.ptr->updateType == updateType) {
+                            
+                            if (SystemsStaticOnStart.dic.Data.TryGetValue(child.data.ptr->graph.ptr->graphId, out var ptr) == true) {
 
-                            //UnityEngine.Debug.Log("RaiseOnUpdate Call: " + SystemsStaticOnUpdate.dic.Data.Count + ", child.data->graph->graphId: " + child.data->graph->graphId + ", updateType: " + updateType);
-                            if (SystemsStaticOnUpdate.dic.Data.TryGetValue(child.data->graph->graphId, out var ptr) == true) {
+                                var func = new Unity.Burst.FunctionPointer<OnStart>(ptr);
+                                func.Invoke(deltaTimeMs, ref world, ref dependsOn);
+                                result = true;
 
-                                //UnityEngine.Debug.Log("static systems call RaiseOnUpdate: " + child.data->graph->graphId + ", updateType: " + updateType);
+                            }
+                            
+                        }
+                    }
+                }
+            }
+            
+            return result;
+
+        }
+
+        public static bool RaiseOnUpdate(in SystemGroup rootGroup, ushort updateType, uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
+
+            var result = false;
+            if (rootGroup.rootNode.ptr != null) {
+                //UnityEngine.Debug.Log("RaiseOnUpdate Call: " + rootGroup.rootNode.ptr->childrenIndex + ", updateType: " + updateType);
+                for (uint i = 0u; i < rootGroup.rootNode.ptr->childrenIndex; ++i) {
+                    var child = rootGroup.rootNode.ptr->children[i];
+                    if (child.data.ptr->graph.ptr != null) {
+                        if (updateType == 0 || child.data.ptr->graph.ptr->updateType == updateType) {
+
+                            //UnityEngine.Debug.Log("RaiseOnUpdate Call: " + SystemsStaticOnUpdate.dic.Data.Count + ", child.data.ptr->graph.ptr->graphId: " + child.data.ptr->graph.ptr->graphId + ", updateType: " + updateType);
+                            if (SystemsStaticOnUpdate.dic.Data.TryGetValue(child.data.ptr->graph.ptr->graphId, out var ptr) == true) {
+
+                                //UnityEngine.Debug.Log("static systems call RaiseOnUpdate: " + child.data.ptr->graph.ptr->graphId + ", updateType: " + updateType);
                                 var func = new Unity.Burst.FunctionPointer<OnUpdate>(ptr);
-                                func.Invoke(dt, ref world, ref dependsOn);
+                                func.Invoke(deltaTimeMs, ref world, ref dependsOn);
                                 result = true;
 
                             }
@@ -187,15 +280,15 @@ namespace ME.BECS {
         public static bool RaiseOnDrawGizmos(in SystemGroup rootGroup, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
 
             var result = false;
-            if (rootGroup.rootNode != null) {
-                for (uint i = 0u; i < rootGroup.rootNode->childrenIndex; ++i) {
-                    var child = rootGroup.rootNode->children[i];
-                    if (child.data->graph != null) {
+            if (rootGroup.rootNode.ptr != null) {
+                for (uint i = 0u; i < rootGroup.rootNode.ptr->childrenIndex; ++i) {
+                    var child = rootGroup.rootNode.ptr->children[i];
+                    if (child.data.ptr->graph.ptr != null) {
                         
-                        if (SystemsStaticOnDrawGizmos.dic.Data.TryGetValue(child.data->graph->graphId, out var ptr) == true) {
+                        if (SystemsStaticOnDrawGizmos.dic.Data.TryGetValue(child.data.ptr->graph.ptr->graphId, out var ptr) == true) {
 
                             var func = new Unity.Burst.FunctionPointer<OnDrawGizmos>(ptr);
-                            func.Invoke(0f, ref world, ref dependsOn);
+                            func.Invoke(0u, ref world, ref dependsOn);
                             result = true;
 
                         }
@@ -208,19 +301,19 @@ namespace ME.BECS {
 
         }
 
-        public static bool RaiseOnDestroy(in SystemGroup rootGroup, ushort updateType, float dt, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
+        public static bool RaiseOnDestroy(in SystemGroup rootGroup, ushort updateType, uint deltaTimeMs, ref World world, ref Unity.Jobs.JobHandle dependsOn) {
 
             var result = false;
-            if (rootGroup.rootNode != null) {
-                for (uint i = 0u; i < rootGroup.rootNode->childrenIndex; ++i) {
-                    var child = rootGroup.rootNode->children[i];
-                    if (child.data->graph != null) {
-                        if (updateType == 0 || child.data->graph->updateType == updateType) {
+            if (rootGroup.rootNode.ptr != null) {
+                for (uint i = 0u; i < rootGroup.rootNode.ptr->childrenIndex; ++i) {
+                    var child = rootGroup.rootNode.ptr->children[i];
+                    if (child.data.ptr->graph.ptr != null) {
+                        if (updateType == 0 || child.data.ptr->graph.ptr->updateType == updateType) {
 
-                            if (SystemsStaticOnDestroy.dic.Data.TryGetValue(child.data->graph->graphId, out var ptr) == true) {
+                            if (SystemsStaticOnDestroy.dic.Data.TryGetValue(child.data.ptr->graph.ptr->graphId, out var ptr) == true) {
 
                                 var func = new Unity.Burst.FunctionPointer<OnDestroy>(ptr);
-                                func.Invoke(dt, ref world, ref dependsOn);
+                                func.Invoke(deltaTimeMs, ref world, ref dependsOn);
                                 result = true;
 
                             }
@@ -234,20 +327,21 @@ namespace ME.BECS {
 
         }
 
-        public static bool TryGetSystem<T>(out T* system) where T : unmanaged, ISystem {
+        public static bool TryGetSystem<T>(in SystemGroup rootGroup, out T* system) where T : unmanaged, ISystem {
 
             system = null;
-            if (SystemsStaticGetSystem.dic.Data.TryGetValue(TSystemGraph<T>.index.Data, out var ptr) == true) {
-
-                var func = new Unity.Burst.FunctionPointer<GetSystem>(ptr);
-                func.Invoke(TSystem<T>.index.Data, out var sysPtr);
-                system = (T*)sysPtr;
-                return true;
-
+            if (rootGroup.rootNode.ptr != null) {
+                for (uint i = 0u; i < rootGroup.rootNode.ptr->childrenIndex; ++i) {
+                    var child = rootGroup.rootNode.ptr->children[i];
+                    if (child.data.ptr->graph.ptr != null) {
+                        if (TSystemGraph.GetSystem(child.data.ptr->graph.ptr->graphId, out system) == true) {
+                            return true;
+                        }
+                    }
+                }
             }
-
             return false;
-
+            
         }
 
     }

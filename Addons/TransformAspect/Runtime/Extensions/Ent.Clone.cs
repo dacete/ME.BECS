@@ -5,18 +5,21 @@ namespace ME.BECS.Transforms {
     public static unsafe class EntCloneExt {
 
         [INLINE(256)]
-        public static Ent Clone(this in Ent source, bool cloneHierarchy) {
-            return source.Clone(source.worldId, cloneHierarchy);
+        public static Ent Clone(this in Ent source, bool cloneHierarchy, in JobInfo jobInfo = default) {
+            return source.Clone(source.worldId, cloneHierarchy, in jobInfo);
         }
 
         [INLINE(256)]
-        public static Ent Clone(this in Ent source, ushort worldId, bool cloneHierarchy) {
+        public static Ent Clone(this in Ent source, ushort worldId, bool cloneHierarchy, in JobInfo jobInfo = default) {
 
             if (cloneHierarchy == false) {
-                return source.Clone();
+                var copy = source.Clone();
+                copy.Remove<ParentComponent>();
+                copy.Remove<ChildrenComponent>();
+                return copy;
             }
             
-            var ent = Ent.New(worldId);
+            var ent = Ent.New(worldId, in jobInfo);
             ent.CopyFrom(in source);
             {
                 ref readonly var children = ref source.Read<ChildrenComponent>().list;
@@ -25,21 +28,15 @@ namespace ME.BECS.Transforms {
                     childrenTarget = new ListAuto<Ent>(in ent, children.Count);
                     for (uint i = 0u; i < children.Count; ++i) {
                         var child = children[i];
-                        childrenTarget.Add(child.Clone(worldId, true));
+                        var copy = child.Clone(worldId, true, in jobInfo);
+                        copy.Set(new ParentComponent() {
+                            value = ent,
+                        });
+                        childrenTarget.Add(copy);
                     }
                 }
             }
             return ent;
-
-        }
-        
-        [INLINE(256)]
-        public static void CopyFrom(this in Ent target, in Ent source) {
-
-            var sourceState = source.World.state;
-            var targetState = target.World.state;
-            Batches.Apply(sourceState);
-            sourceState->components.CopyFrom(sourceState, in source, targetState, in target);
 
         }
 

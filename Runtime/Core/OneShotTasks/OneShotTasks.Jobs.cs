@@ -5,34 +5,30 @@ namespace ME.BECS {
     using ME.BECS.Jobs;
     using Unity.Jobs;
     using Unity.Collections.LowLevel.Unsafe;
+    using Unity.Collections;
 
     public unsafe partial struct OneShotTasks {
 
         [BURST(CompileSynchronously = true)]
-        private struct ResolveTasksJob : IJobSingle {
+        private struct ResolveTasksParallelJob : IJobParallelFor {
 
             [NativeDisableUnsafePtrRestriction]
-            public State* state;
+            public safe_ptr<State> state;
             public OneShotType type;
             public ushort updateType;
 
-            public void Execute() {
+            public void Execute(int index) {
 
-                this.state->oneShotTasks.ResolveTasks(this.state, this.type, this.updateType);
-
+                ResolveThread(this.state, this.type, this.updateType, (uint)index);
+                
             }
 
         }
 
         [INLINE(256)]
         [NotThreadSafe]
-        public static JobHandle ResolveTasks(State* state, OneShotType type, ushort updateType, JobHandle dependsOn) {
-            var job = new ResolveTasksJob() {
-                state = state,
-                type = type,
-                updateType = updateType,
-            };
-            return job.ScheduleSingleByRef(dependsOn);
+        public static JobHandle ScheduleJobs(safe_ptr<State> state, OneShotType type, ushort updateType, JobHandle dependsOn) {
+            return OneShotTasks.Schedule(state, type, updateType, dependsOn);
         }
 
     }

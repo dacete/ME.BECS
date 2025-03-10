@@ -1,14 +1,25 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
+
 namespace ME.BECS.Transforms {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using tfloat = System.Single;
-    using Unity.Mathematics;
     
     public static unsafe class Transform3DExt {
 
         [INLINE(256)]
-        public static Ent GetParent(this in Ent ent) {
-            return ent.Read<ParentComponent>().value;
+        public static ref readonly Ent GetParent(this in Ent ent) {
+            return ref ent.Read<ParentComponent>().value;
+        }
+
+        [INLINE(256)]
+        public static ref readonly Ent ReadParent(this in Ent ent) {
+            return ref ent.Read<ParentComponent>().value;
         }
 
         [INLINE(256)]
@@ -39,8 +50,10 @@ namespace ME.BECS.Transforms {
             if (currentParent.IsAlive() == true) {
                 
                 // Move out from current parent
-                ref var children = ref currentParent.Get<ChildrenComponent>().list;
-                children.Remove(ent);
+                ref var children = ref currentParent.Get<ChildrenComponent>();
+                children.lockSpinner.Lock();
+                children.list.Remove(ent);
+                children.lockSpinner.Unlock();
                 ent.Remove<IsFirstLevelComponent>();
                 currentParent = default;
 
@@ -56,9 +69,12 @@ namespace ME.BECS.Transforms {
 
             {
                 // Move to the new parent
-                ref var parentChildren = ref parent.Get<ChildrenComponent>().list;
-                if (parentChildren.isCreated == false) parentChildren = new ListAuto<Ent>(parent, 1u); 
-                parentChildren.Add(ent);
+                ref var parentChildren = ref parent.Get<ChildrenComponent>();
+                parentChildren.lockSpinner.Lock();
+                if (parentChildren.list.IsCreated == false) parentChildren.list = new ListAuto<Ent>(parent, 1u); 
+                parentChildren.list.Add(ent);
+                parentChildren.list.Sort<Ent>();
+                parentChildren.lockSpinner.Unlock();
                 currentParent = parent;
                 // if new parent has no parent component
                 // set IsFirstLevelComponent
@@ -72,61 +88,54 @@ namespace ME.BECS.Transforms {
         [INLINE(256)]
         public static void CalculateMatrix(in TransformAspect parent, in TransformAspect ent) {
 
-            var matrix = ent.localMatrix;
-            if (parent.ent.IsAlive() == true) matrix = math.mul(parent.readWorldMatrix, matrix);
-            ent.worldMatrix = matrix;
-            ent.worldMatrixCalculated = 1;
+            ent.worldMatrix = math.mul(parent.readWorldMatrix, ent.readLocalMatrix);
 
         }
 
         [INLINE(256)]
-        public static void CalculateMatrix(in TransformAspect ent) {
+        public static void CalculateLocalMatrix(in TransformAspect ent) {
 
-            ent.worldMatrix = ent.localMatrix;
-            ent.worldMatrixCalculated = 1;
+            ent.localMatrix = float4x4.TRS(ent.readLocalPosition, ent.readLocalRotation, ent.readLocalScale);
 
         }
 
         [INLINE(256)]
-        public static void CalculateMatrixHierarchy(in CommandBufferJobParallel buffer) {
-            var aspect = buffer.ent.GetAspect<TransformAspect>();
-            CalculateMatrixHierarchy(aspect.parent, aspect);
+        public static void CalculateWorldMatrix(in TransformAspect ent) {
+
+            ent.worldMatrix = ent.readLocalMatrix;
+
         }
 
         [INLINE(256)]
-        public static void CalculateMatrixHierarchy(ref TransformAspect aspect) {
-            CalculateMatrixHierarchy(aspect.parent, aspect);
+        public static void CalculateWorldMatrixHierarchy(ref TransformAspect aspect) {
+            CalculateWorldMatrixHierarchy(aspect.parent, aspect);
         }
 
         [INLINE(256)]
-        public static void CalculateMatrixHierarchy(in CommandBufferJob buffer) {
-            CalculateMatrixHierarchy(buffer.Read<ParentComponent>().value, buffer.ent);
-        }
-
-        [INLINE(256)]
-        public static void CalculateMatrixHierarchy(in TransformAspect parent, in TransformAspect ent) {
+        public static void CalculateWorldMatrixHierarchy(in TransformAspect parent, in TransformAspect ent) {
 
             CalculateMatrix(in parent, in ent);
             
             var cnt = ent.children.Count;
             if (cnt > 0u) {
 
-                var queue = new Unity.Collections.LowLevel.Unsafe.UnsafeList<TransformAspect>((int)cnt, Constants.ALLOCATOR_TEMP_ST);
+                var queue = new Unity.Collections.LowLevel.Unsafe.UnsafeList<TransformAspect>((int)cnt, Constants.ALLOCATOR_TEMP);
                 queue.Add(ent);
                 while (queue.Length > 0) {
                     var entData = queue[0];
                     queue.RemoveAtSwapBack(0);
                     cnt = entData.children.Count;
                     if (cnt > 0u) {
-                        var children = (Ent*)entData.children.GetUnsafePtr(in entData.ent.World.state->allocator);
+                        var children = (safe_ptr<Ent>)entData.children.GetUnsafePtr(in entData.ent.World.state.ptr->allocator);
                         for (uint i = 0; i < cnt; ++i) {
-                            var child = *(children + i);
+                            var child = *(children + i).ptr;
                             var tr = child.GetAspect<TransformAspect>();
                             CalculateMatrix(in entData, in tr);
                             queue.Add(tr);
                         }
                     }
                 }
+                queue.Dispose();
                 
             }
 

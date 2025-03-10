@@ -2,8 +2,6 @@ using UnityEngine;
 
 namespace ME.BECS {
     
-    using Unity.Jobs;
-
     [DefaultExecutionOrder(-10_000)]
     public class WorldInitializer : BaseWorldInitializer {
 
@@ -11,9 +9,7 @@ namespace ME.BECS {
         public FeaturesGraph.SystemsGraph featuresGraphFixedUpdate;
         public FeaturesGraph.SystemsGraph featuresGraphLateUpdate;
 
-        protected override void Awake() {
-            
-            base.Awake();
+        protected override void DoWorldAwake() {
             
             if (this.featuresGraph == null && this.featuresGraphFixedUpdate == null) {
                 Logger.Features.Error("Graphs are null");
@@ -26,19 +22,23 @@ namespace ME.BECS {
             if (this.featuresGraphLateUpdate != null) group.Add(this.featuresGraphLateUpdate.DoAwake(ref this.world, UpdateType.LATE_UPDATE));
             this.world.AssignRootSystemGroup(group);
 
+            base.DoWorldAwake();
+            
         }
 
         public void Update() {
 
             this.previousFrameDependsOn.Complete();
             this.previousFrameDependsOn = this.DoUpdate(UpdateType.UPDATE, this.previousFrameDependsOn);
-            
+            this.previousFrameDependsOn.Complete();
+
         }
 
         public void FixedUpdate() {
 
             this.previousFrameDependsOn.Complete();
             this.previousFrameDependsOn = this.DoUpdate(UpdateType.FIXED_UPDATE, this.previousFrameDependsOn);
+            this.previousFrameDependsOn.Complete();
             
         }
 
@@ -57,7 +57,7 @@ namespace ME.BECS {
                     this.previousFrameDependsOn = module.obj.OnUpdate(this.previousFrameDependsOn);
                 }
             }
-
+            
             base.LateUpdate();
 
         }

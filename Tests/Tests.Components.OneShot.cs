@@ -25,7 +25,7 @@ namespace ME.BECS.Tests {
                 
                 context.dependsOn.Complete();
 
-                var tick = context.world.state->tick;
+                var tick = context.world.state.ptr->tick;
                 if (tick == 1UL) {
                     Assert.IsFalse(this.ent.Has<TestComponent>());
                     this.ent.SetOneShot(new TestComponent(), OneShotType.CurrentTick);
@@ -47,7 +47,7 @@ namespace ME.BECS.Tests {
                 
                 context.dependsOn.Complete();
 
-                var tick = context.world.state->tick;
+                var tick = context.world.state.ptr->tick;
                 if (tick == 1UL) {
                     Assert.IsFalse(this.ent.Has<TestComponent>());
                     this.ent.SetOneShot(new TestComponent(), OneShotType.NextTick);
@@ -74,8 +74,8 @@ namespace ME.BECS.Tests {
                 group.Add(new TestCurrentTickSystem() { ent = ent, });
                 world.AssignRootSystemGroup(group);
 
-                world.Tick(0f).Complete();
-                world.Tick(0f).Complete();
+                world.Tick(0u).Complete();
+                world.Tick(0u).Complete();
             }
             world.Dispose();
 
@@ -91,9 +91,9 @@ namespace ME.BECS.Tests {
                 group.Add(new TestNextTickSystem() { ent = ent, });
                 world.AssignRootSystemGroup(group);
 
-                world.Tick(0f).Complete();
-                world.Tick(0f).Complete();
-                world.Tick(0f).Complete();
+                world.Tick(0u).Complete();
+                world.Tick(0u).Complete();
+                world.Tick(0u).Complete();
             }
             world.Dispose();
 

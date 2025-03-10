@@ -6,15 +6,16 @@ namespace ME.BECS.Commands {
     using Units;
     using Transforms;
     
+    [BURST(CompileSynchronously = true)]
     [RequiredDependencies(typeof(BuildGraphSystem))]
     public struct CommandBuildSystem : IUpdate {
 
         [BURST(CompileSynchronously = true)]
-        public struct Job : IJobParallelForAspect<UnitCommandGroupAspect> {
+        public struct Job : IJobForAspects<UnitCommandGroupAspect> {
 
             public BuildGraphSystem buildGraphSystem;
             
-            public void Execute(in JobInfo jobInfo, ref UnitCommandGroupAspect commandGroup) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref UnitCommandGroupAspect commandGroup) {
 
                 var parameters = commandGroup.ent.Read<CommandBuild>();
                 if (parameters.building.Has<BuildingInProgress>() == false && parameters.building.IsActive() == false) {
@@ -73,7 +74,7 @@ namespace ME.BECS.Commands {
         public void OnUpdate(ref SystemContext context) {
 
             var buildGraphSystem = context.world.GetSystem<BuildGraphSystem>();
-            var handle = context.Query().With<CommandBuild>().With<IsCommandGroupDirty>().Schedule<Job, UnitCommandGroupAspect>(new Job() {
+            var handle = context.Query().With<CommandBuild>().With<IsCommandGroupDirty>().AsParallel().Schedule<Job, UnitCommandGroupAspect>(new Job() {
                 buildGraphSystem = buildGraphSystem,
             });
             context.SetDependency(handle);

@@ -30,7 +30,7 @@ namespace ME.BECS.Jobs {
                 buffer = buffer,
             };
 
-            var parameters = new JobsUtility.JobScheduleParameters(_address(ref data), GetReflectionData<T>(), inputDeps, ScheduleMode.Parallel);
+            var parameters = new JobsUtility.JobScheduleParameters(_addressPtr(ref data), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
             return JobsUtility.Schedule(ref parameters);
             
         }
@@ -43,7 +43,7 @@ namespace ME.BECS.Jobs {
                 buffer = buffer,
             };
 
-            var parameters = new JobsUtility.JobScheduleParameters(_address(ref data), GetReflectionData<T>(), inputDeps, ScheduleMode.Parallel);
+            var parameters = new JobsUtility.JobScheduleParameters(_addressPtr(ref data), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
             return JobsUtility.Schedule(ref parameters);
             
         }
@@ -74,8 +74,8 @@ namespace ME.BECS.Jobs {
                 jobData.buffer->BeginForEachRange(0u, jobData.buffer->count);
                 for (int i = 0; i < jobData.buffer->count; ++i) {
                     var entId = jobData.buffer->entities[i];
-                    var entGen = jobData.buffer->state->entities.GetGeneration(jobData.buffer->state, entId);
-                    var commandBuffer = new CommandBufferJob(entId, entGen, jobData.buffer);
+                    var entGen = Ents.GetGeneration(jobData.buffer->state, entId);
+                    var commandBuffer = new CommandBufferJob(entId, entGen, (safe_ptr)jobData.buffer);
                     jobData.jobData.Execute(in commandBuffer);
                 }
                 jobData.buffer->EndForEachRange();

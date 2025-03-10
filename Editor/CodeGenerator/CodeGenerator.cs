@@ -8,21 +8,15 @@ namespace ME.BECS.Editor {
 
     public abstract class CustomCodeGenerator {
 
-        public System.Collections.Generic.List<CodeGenerator.AssemblyInfo> asms;
+        public System.Collections.Generic.List<AssemblyInfo> asms;
         public bool editorAssembly;
-        public UnityEditor.TypeCache.TypeCollection burstedTypes;
+        public System.Collections.Generic.List<System.Type> burstedTypes;
         public UnityEditor.TypeCache.MethodCollection burstDiscardedTypes;
 
         public bool IsValidTypeForAssembly(System.Type type) {
 
-            if (type == null) return false;
+            return EditorUtils.IsValidTypeForAssembly(this.editorAssembly, type, this.asms);
             
-            var asm = type.Assembly.GetName().Name;
-            var info = this.asms.FirstOrDefault(x => x.name == asm);
-            if (this.editorAssembly == false && info.isEditor == true) return false;
-            if (this.editorAssembly == true && info.isEditor == false) return false;
-            return true;
-
         }
         
         public virtual void AddInitialization(System.Collections.Generic.List<string> dataList, System.Collections.Generic.List<System.Type> references) {
@@ -33,22 +27,25 @@ namespace ME.BECS.Editor {
             return new System.Collections.Generic.List<CodeGenerator.MethodDefinition>();
         }
 
-        public static string GetTypeName(System.Type type) {
-            if (type.IsGenericType == true) {
-                var first = type.FullName.Split('[')[0].Replace("+", ".").Replace("`1", "");
-                return $"{first}<{GetTypeName(type.GenericTypeArguments[0])}>";
-            }
-            return type.FullName.Replace("+", ".").Replace("`1", "");
-        }
-
-        public static string GetDataTypeName(System.Type type) {
-            return type.Namespace + "." + type.Name.Replace("+", ".").Replace("`1", "");
-        }
-
         public virtual string AddPublicContent() {
             return string.Empty;
         }
 
+    }
+
+    public class CodeGeneratorImporter : UnityEditor.AssetPostprocessor {
+
+        private static void OnPostprocessAllAssets(string[] importedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths, bool didDomainReload) {
+            foreach (var path in importedAssets) {
+                if (path.EndsWith(".cs") == true &&
+                    path.Contains("ME.BECS.Gen.cs") == false) {
+                    //UnityEngine.Debug.Log($"Destroy helper because of {path}");
+                    //CodeGenerator.Destroy();
+                    break;
+                }
+            }
+        }
+        
     }
     
     public static class CodeGenerator {
@@ -56,78 +53,31 @@ namespace ME.BECS.Editor {
         public struct MethodDefinition {
 
             public string methodName;
+            public string customMethodParamsCall;
             public string type;
+            public string registerMethodName;
             public string definition;
             public string content;
+            public bool burstCompile;
 
-        }
-        
-        public struct AssemblyInfo {
-
-            public string name;
-            public string[] includePlatforms;
-            public string[] references;
-            public bool isEditor;
-
-            public AssemblyInfo Init() {
-
-                this.isEditor = false;
-                if (this.includePlatforms != null) {
-                    var hasEditor = System.Array.IndexOf(this.includePlatforms, "Editor") >= 0;
-                    this.isEditor = hasEditor == true && this.includePlatforms.Length == 1;
-                }
-
-                if (this.references != null) {
-                    for (int i = 0; i < this.references.Length; ++i) {
-                        ref var r = ref this.references[i];
-                        if (r.StartsWith("GUID:") == true) {
-                            var asmName = UnityEditor.AssetDatabase.GUIDToAssetPath(r.Substring(5, r.Length - 5));
-                            if (string.IsNullOrEmpty(asmName) == false) {
-                                var asset = UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEngine.TextAsset>(asmName);
-                                if (asset != null) {
-                                    var txt = asset.name;
-                                    r = txt;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                return this;
-
-            }
-
-            public bool HasReference(string asm) {
-                return System.Array.IndexOf(this.references, asm) >= 0;
+            public string GetMethodParamsCall() {
+                if (this.customMethodParamsCall != null) return this.customMethodParamsCall;
+                return this.methodName;
             }
 
         }
         
         public const string ECS = "ME.BECS";
         public const string AWAKE_METHOD = "BurstCompileOnAwake";
+        public const string START_METHOD = "BurstCompileOnStart";
         public const string UPDATE_METHOD = "BurstCompileOnUpdate";
         public const string DESTROY_METHOD = "BurstCompileOnDestroy";
         public const string DRAWGIZMOS_METHOD = "BurstCompileOnDrawGizmos";
 
-        private static System.Collections.Generic.List<AssemblyInfo> loadedAssemblies;
-        public static System.Collections.Generic.List<AssemblyInfo> GetAssembliesInfo() {
-            if (loadedAssemblies == null) {
-                var list = new System.Collections.Generic.List<AssemblyInfo>();
-                var asmdefs = UnityEditor.AssetDatabase.FindAssets("t:asmdef");
-                foreach (var guid in asmdefs) {
-                    var asmPath = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
-                    var info = System.IO.File.ReadAllText(asmPath);
-                    list.Add(UnityEngine.JsonUtility.FromJson<AssemblyInfo>(info).Init());
-                }
-
-                loadedAssemblies = list;
-            }
-
-            return loadedAssemblies;
-        }
-        
         static CodeGenerator() {
             
+            UnityEngine.Application.logMessageReceived -= OnLogAdded;
+            UnityEngine.Application.logMessageReceivedThreaded -= OnLogAdded;
             UnityEngine.Application.logMessageReceived += OnLogAdded;
             UnityEngine.Application.logMessageReceivedThreaded += OnLogAdded;
 
@@ -136,6 +86,8 @@ namespace ME.BECS.Editor {
         [UnityEditor.Callbacks.DidReloadScripts]
         public static void OnScriptsReload() {
             
+            UnityEngine.Application.logMessageReceived -= OnLogAdded;
+            UnityEngine.Application.logMessageReceivedThreaded -= OnLogAdded;
             UnityEngine.Application.logMessageReceived += OnLogAdded;
             UnityEngine.Application.logMessageReceivedThreaded += OnLogAdded;
 
@@ -161,9 +113,18 @@ namespace ME.BECS.Editor {
                     filenamePostfix = ".ref",
                     variables = new [] {
                         new System.Collections.Generic.KeyValuePair<string, string>("inref", "ref"),
+                        new System.Collections.Generic.KeyValuePair<string, string>("GetRead", "Get"),
                         new System.Collections.Generic.KeyValuePair<string, string>("RWRO", "RW"),
                     },
                 },
+                /*new VariantInfo() {
+                    filenamePostfix = ".in",
+                    variables = new [] {
+                        new System.Collections.Generic.KeyValuePair<string, string>("inref", "in"),
+                        new System.Collections.Generic.KeyValuePair<string, string>("GetRead", "Read"),
+                        new System.Collections.Generic.KeyValuePair<string, string>("RWRO", "RO"),
+                    },
+                },*/
             };
             var templates = UnityEditor.AssetDatabase.FindAssets("t:TextAsset .Tpl");
             foreach (var guid in templates) {
@@ -171,21 +132,49 @@ namespace ME.BECS.Editor {
                 var path = UnityEditor.AssetDatabase.GUIDToAssetPath(guid);
                 var dir = System.IO.Path.GetDirectoryName(path);
 
+                var fileName = System.IO.Path.GetFileName(path);
+                dir = $"{dir}/{fileName.Replace(".Tpl.txt", string.Empty)}";
                 var text = System.IO.File.ReadAllText(path);
                 foreach (var postfix in postfixes) {
                     foreach (var key in postfix.variables) {
                         variables[key.Key] = key.Value;
                     }
-                    var maxCount = 10;
-                    for (int i = 1; i < maxCount; ++i) {
-                        var keys = new System.Collections.Generic.Dictionary<string, int>() {
-                            { "count", i },
-                        };
-                        var filePath = dir + System.IO.Path.DirectorySeparatorChar + System.IO.Path.GetFileName(path).Replace(".Tpl.txt", $"{i}{postfix.filenamePostfix}.cs");
-                        
-                        var tpl = new Tpl(text);
-                        System.IO.File.WriteAllText(filePath, tpl.GetString(keys, variables));
-                        UnityEditor.AssetDatabase.ImportAsset(filePath);
+
+                    if (System.IO.Directory.Exists(dir) == false) {
+                        System.IO.Directory.CreateDirectory(dir);
+                    }
+
+                    const uint maxCount = 10u;
+                    uint variationsCount = 0u;
+                    if (path.EndsWith("_var.Tpl.txt") == true) {
+                        variationsCount = 5u;
+                        for (int i = 1; i < maxCount; ++i) {
+                            var keys = new System.Collections.Generic.Dictionary<string, int>() {
+                                { "countAspects", i },
+                            };
+                            variables["countAspects"] = i.ToString();
+                            for (int j = 1; j < variationsCount; ++j) {
+                                keys["countComponents"] = j;
+                                keys["count"] = i + j;
+                                variables["PREFIX"] = $"{i}_{j}";
+                                variables["countComponents"] = j.ToString();
+                                var filePath = $"{dir}/{fileName.Replace(".Tpl.txt", $"{i}_{j}{postfix.filenamePostfix}.cs")}";
+                                var tpl = new Tpl(text);
+                                System.IO.File.WriteAllText(filePath, tpl.GetString(keys, variables));
+                                UnityEditor.AssetDatabase.ImportAsset(filePath);
+                            }
+                        }
+                    } else {
+                        for (int i = 1; i < maxCount; ++i) {
+                            var keys = new System.Collections.Generic.Dictionary<string, int>() {
+                                { "count", i },
+                            };
+                            variables["PREFIX"] = $"{i}";
+                            var filePath = $"{dir}/{fileName.Replace(".Tpl.txt", $"{i}{postfix.filenamePostfix}.cs")}";
+                            var tpl = new Tpl(text);
+                            System.IO.File.WriteAllText(filePath, tpl.GetString(keys, variables));
+                            UnityEditor.AssetDatabase.ImportAsset(filePath);
+                        }
                     }
                 }
 
@@ -202,15 +191,30 @@ namespace ME.BECS.Editor {
 
         }
 
+        public static void Destroy() {
+            {
+                var dir = $"Assets/{ECS}.Gen/Runtime";
+                var path = @$"{dir}/{ECS}.Gen.cs";
+                UnityEditor.AssetDatabase.DeleteAsset(path);
+            }
+            {
+                var dir = $"Assets/{ECS}.Gen/Editor";
+                var path = @$"{dir}/{ECS}.Gen.cs";
+                UnityEditor.AssetDatabase.DeleteAsset(path);
+            }
+        }
+
         public static void RegenerateBurstAOT() {
 
-            var list = GetAssembliesInfo();
+            UnityEditor.EditorPrefs.SetInt("ME.BECS.CodeGenerator.TempError", UnityEditor.EditorPrefs.GetInt("ME.BECS.CodeGenerator.TempError", 0) + 1);
+            
+            var list = EditorUtils.GetAssembliesInfo();
             {
-                var dir = $"Assets/{ECS}.BurstHelper/Runtime";
+                var dir = $"Assets/{ECS}.Gen/Runtime";
                 Build(list, dir);
             }
             {
-                var dir = $"Assets/{ECS}.BurstHelper/Editor";
+                var dir = $"Assets/{ECS}.Gen/Editor";
                 Build(list, dir, editorAssembly: true);
             }
             
@@ -240,31 +244,24 @@ namespace ME.BECS.Editor {
 
         private static void OnLogAdded(string condition, string stackTrace, UnityEngine.LogType type) {
 
-            if (type == UnityEngine.LogType.Exception ||
+            /*if (type == UnityEngine.LogType.Exception ||
                 type == UnityEngine.LogType.Error) {
-                if (condition.Contains($"{ECS}.BurstHelper.cs") == true ||
-                    stackTrace.Contains($"{ECS}.BurstHelper.cs") == true) {
-                    if (condition.Contains("does not exist in the namespace") == true) {
+                if (condition.Contains($"{ECS}.Gen.cs") == true ||
+                    stackTrace.Contains($"{ECS}.Gen.cs") == true) {
+                    if (condition.Contains("CS0426") == true) {
                         // Remove files
-                        /*{
-                            var dir = $"Assets/{ECS}.BurstHelper/Runtime";
-                            var path = @$"{dir}/{ECS}.BurstHelper.cs";
-                            UnityEditor.AssetDatabase.DeleteAsset(path);
-                        }
-                        {
-                            var dir = $"Assets/{ECS}.BurstHelper/Editor";
-                            var path = @$"{dir}/{ECS}.BurstHelper.cs";
-                            UnityEditor.AssetDatabase.DeleteAsset(path);
-                        }*/
+                        UnityEngine.Debug.Log("Regenerating burst helper: " + UnityEditor.EditorPrefs.GetInt("ME.BECS.CodeGenerator.TempError", 0));
+                        if (UnityEditor.EditorPrefs.GetInt("ME.BECS.CodeGenerator.TempError", 0) % 2 == 0) return;
+                        Destroy();
                     }
                 }
-            }
+            }*/
             
         }
 
         private static void Build(System.Collections.Generic.List<AssemblyInfo> asms, string dir, bool editorAssembly = false) {
 
-            var postfix = string.Empty;
+            string postfix;
             if (editorAssembly == true) {
                 postfix = "Editor";
             } else {
@@ -280,18 +277,26 @@ namespace ME.BECS.Editor {
             
             var componentTypes = new System.Collections.Generic.List<System.Type>();
             {
-                var path = @$"{dir}/{ECS}.BurstHelper.cs";
-                var template = EditorUtils.LoadResource<UnityEngine.TextAsset>("ME.BECS.Resources/Templates/Types-Template.txt").text;
+                var path = @$"{dir}/{ECS}.Gen.cs";
+                string template = null;
+                if (editorAssembly == true) {
+                    template = EditorUtils.LoadResource<UnityEngine.TextAsset>($"ME.BECS.Resources/Templates/Types-Editor-Template.txt").text;
+                }
+                else {
+                    template = EditorUtils.LoadResource<UnityEngine.TextAsset>($"ME.BECS.Resources/Templates/Types-Template.txt").text;
+                }
+
                 //var template = "namespace " + ECS + " {\n [UnityEngine.Scripting.PreserveAttribute] public static unsafe class AOTBurstHelper { \n[UnityEngine.Scripting.PreserveAttribute] \npublic static void AOT() { \n{{CONTENT}} \n}\n }\n }";
                 var content = new System.Collections.Generic.List<string>();
                 var typesContent = new System.Collections.Generic.List<string>();
-                var types = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(ISystem));
-                var burstedTypes = UnityEditor.TypeCache.GetTypesWithAttribute<BURST>();
+                var types = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(ISystem)).OrderBy(x => x.FullName).ToArray();
+                var burstedTypes = UnityEditor.TypeCache.GetTypesWithAttribute<BURST>().OrderBy(x => x.FullName).ToList();
                 var burstDiscardedTypes = UnityEditor.TypeCache.GetMethodsWithAttribute<WithoutBurstAttribute>();
-                var typesAwake = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IAwake));
-                var typesUpdate = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IUpdate));
-                var typesDestroy = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IDestroy));
-                var typesDrawGizmos = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IDrawGizmos));
+                var typesAwake = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IAwake)).OrderBy(x => x.FullName).ToArray();
+                var typesStart = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IStart)).OrderBy(x => x.FullName).ToArray();
+                var typesUpdate = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IUpdate)).OrderBy(x => x.FullName).ToArray();
+                var typesDestroy = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IDestroy)).OrderBy(x => x.FullName).ToArray();
+                var typesDrawGizmos = UnityEditor.TypeCache.GetTypesDerivedFrom(typeof(IDrawGizmos)).OrderBy(x => x.FullName).ToArray();
                 foreach (var type in types) {
 
                     if (type.IsValueType == false) continue;
@@ -308,17 +313,23 @@ namespace ME.BECS.Editor {
 
                     var isBursted = (burstedTypes.Contains(type) == true);
                     var hasAwake = typesAwake.Contains(type);
+                    var hasStart = typesStart.Contains(type);
                     var hasUpdate = typesUpdate.Contains(type);
                     var hasDestroy = typesDestroy.Contains(type);
                     var hasDrawGizmos = typesDrawGizmos.Contains(type);
                     //if (burstedTypes.Contains(type) == false) continue;
                     
                     var awakeBurst = hasAwake == true && burstDiscardedTypes.Contains(type.GetMethod(nameof(IAwake.OnAwake))) == false;
+                    var startBurst = hasStart == true && burstDiscardedTypes.Contains(type.GetMethod(nameof(IStart.OnStart))) == false;
                     var updateBurst = hasUpdate == true && burstDiscardedTypes.Contains(type.GetMethod(nameof(IUpdate.OnUpdate))) == false;
                     var destroyBurst = hasDestroy == true && burstDiscardedTypes.Contains(type.GetMethod(nameof(IDestroy.OnDestroy))) == false;
                     var drawGizmosBurst = hasDrawGizmos == true && burstDiscardedTypes.Contains(type.GetMethod(nameof(IDrawGizmos.OnDrawGizmos))) == false;
                     if (awakeBurst == true) {
                         if (isBursted == true) content.Add($"{AWAKE_METHOD}<{systemType}>.MakeMethod(null);");
+                    }
+
+                    if (startBurst == true) {
+                        if (isBursted == true) content.Add($"{START_METHOD}<{systemType}>.MakeMethod(null);");
                     }
 
                     if (updateBurst == true) {
@@ -334,18 +345,20 @@ namespace ME.BECS.Editor {
                     }
 
                     if (hasAwake == true) content.Add($"{AWAKE_METHOD}NoBurst<{systemType}>.MakeMethod(null);");
+                    if (hasStart == true) content.Add($"{START_METHOD}NoBurst<{systemType}>.MakeMethod(null);");
                     if (hasUpdate == true) content.Add($"{UPDATE_METHOD}NoBurst<{systemType}>.MakeMethod(null);");
                     if (hasDestroy == true) content.Add($"{DESTROY_METHOD}NoBurst<{systemType}>.MakeMethod(null);");
                     if (hasDrawGizmos == true) content.Add($"{DRAWGIZMOS_METHOD}NoBurst<{systemType}>.MakeMethod(null);");
 
                     if (awakeBurst == true) content.Add($"BurstCompileMethod.MakeAwake<{systemType}>(default);");
+                    if (startBurst == true) content.Add($"BurstCompileMethod.MakeStart<{systemType}>(default);");
                     if (updateBurst == true) content.Add($"BurstCompileMethod.MakeUpdate<{systemType}>(default);");
                     if (destroyBurst == true) content.Add($"BurstCompileMethod.MakeDestroy<{systemType}>(default);");
                     if (drawGizmosBurst == true) content.Add($"BurstCompileMethod.MakeDrawGizmos<{systemType}>(default);");
 
                 }
                 
-                var components = UnityEditor.TypeCache.GetTypesWithAttribute<ComponentGroupAttribute>();
+                var components = UnityEditor.TypeCache.GetTypesWithAttribute<ComponentGroupAttribute>().OrderBy(x => x.FullName).ToArray();
                 foreach (var component in components) {
 
                     var asm = component.Assembly.GetName().Name;
@@ -362,7 +375,7 @@ namespace ME.BECS.Editor {
                 }
 
                 {
-                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponent>();
+                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponent>().OrderBy(x => x.FullName).ToArray();
                     foreach (var component in allComponents) {
 
                         if (component.IsValueType == false) continue;
@@ -374,12 +387,14 @@ namespace ME.BECS.Editor {
                         var isTagType = IsTagType(component);
                         var isTag = isTagType.ToString().ToLower();
                         var type = component.FullName.Replace("+", ".");
-                        var str = $"StaticTypes<{type}>.Validate(isTag: {isTag});";
-                        typesContent.Add(str);
+                        {
+                            var str = $"StaticTypes<{type}>.Validate(isTag: {isTag});";
+                            typesContent.Add(str);
+                        }
                         componentTypes.Add(component);
                         if (isTagType == false) {
                             if (component.GetProperty("Default", BindingFlags.Static | BindingFlags.Public) != null) {
-                                str = $"StaticTypes<{type}>.SetDefaultValue({type}.Default);";
+                                var str = $"StaticTypes<{type}>.SetDefaultValue({type}.Default);";
                                 typesContent.Add(str);
                             }
                         }
@@ -388,7 +403,7 @@ namespace ME.BECS.Editor {
                     }
                 }
                 {
-                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponentDestroy>();
+                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponentDestroy>().OrderBy(x => x.FullName).ToArray();
                     foreach (var component in allComponents) {
 
                         if (component.IsValueType == false) continue;
@@ -408,7 +423,7 @@ namespace ME.BECS.Editor {
                     }
                 }
                 {
-                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponentShared>();
+                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponentShared>().OrderBy(x => x.FullName).ToArray();
                     foreach (var component in allComponents) {
 
                         if (component.IsValueType == false) continue;
@@ -428,7 +443,7 @@ namespace ME.BECS.Editor {
                     }
                 }
                 {
-                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IComponentStatic>();
+                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IConfigComponentStatic>().OrderBy(x => x.FullName).ToArray();
                     foreach (var component in allComponents) {
 
                         if (component.IsValueType == false) continue;
@@ -447,7 +462,7 @@ namespace ME.BECS.Editor {
                     }
                 }
                 {
-                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IConfigInitialize>();
+                    var allComponents = UnityEditor.TypeCache.GetTypesDerivedFrom<IConfigInitialize>().OrderBy(x => x.FullName).ToArray();
                     foreach (var component in allComponents) {
 
                         if (component.IsValueType == false) continue;
@@ -466,8 +481,6 @@ namespace ME.BECS.Editor {
                     }
                 }
 
-                var methodRegistryContents = System.Array.Empty<string>();
-                var methodContents = System.Array.Empty<string>();
                 var methods = new System.Collections.Generic.List<MethodDefinition>();
                 var publicContent = new System.Collections.Generic.List<string>();
                 {
@@ -485,13 +498,8 @@ namespace ME.BECS.Editor {
 
                 }
 
-                methodRegistryContents = methods.Where(x => x.definition != null && x.type != null).Select(x => {
-                    return $"WorldStaticCallbacks.RegisterCallback<{x.type}>({x.methodName});";
-                }).ToArray();
-
-                methodContents = methods.Where(x => x.definition != null).Select(x => {
-                    return $"public static void {x.methodName}({x.definition}) {{\n{x.content}\n}}";
-                }).ToArray();
+                var methodRegistryContents = methods.Where(x => x.definition != null && x.type != null).Select(x => $"WorldStaticCallbacks.{x.registerMethodName}<{x.type}>({x.GetMethodParamsCall()});").ToArray();
+                var methodContents = methods.Where(x => x.definition != null).Select(x => $"{(x.burstCompile == true ? "[BurstCompile]" : string.Empty)} public static unsafe void {x.methodName}({x.definition}) {{\n{x.content}\n}}").ToArray();
 
                 var newContent = template.Replace("{{CONTENT}}", string.Join("\n", content));
                 newContent = newContent.Replace("{{CUSTOM_METHOD_REGISTRY}}", string.Join("\n", methodRegistryContents));
@@ -499,17 +507,19 @@ namespace ME.BECS.Editor {
                 newContent = newContent.Replace("{{CONTENT_TYPES}}", string.Join("\n", typesContent));
                 newContent = newContent.Replace("{{EDITOR}}", editorAssembly == true ? ".Editor" : string.Empty);
                 var prevContent = System.IO.File.Exists(path) == true ? System.IO.File.ReadAllText(path) : string.Empty;
+                newContent = EditorUtils.ReFormatCode(newContent);
                 if (prevContent != newContent) {
                     System.IO.File.WriteAllText(path, newContent);
                     UnityEditor.AssetDatabase.ImportAsset(path);
                 }
             }
             {
-                var path = @$"{dir}/{ECS}.BurstHelper.{postfix}.asmdef";
+                var csc = @$"{dir}/csc.rsp";
+                var path = @$"{dir}/{ECS}.Gen.{postfix}.asmdef";
                 var template = string.Empty;
                 if (editorAssembly == true) {
                     template = @"{
-                        ""name"": """ + ECS + @".BurstHelper." + postfix + @""",
+                        ""name"": """ + ECS + @".Gen." + postfix + @""",
                         ""references"": [
                             ""{{CONTENT}}""
                             ],
@@ -520,7 +530,7 @@ namespace ME.BECS.Editor {
                     }";
                 } else {
                     template = @"{
-                        ""name"": """ + ECS + @".BurstHelper." + postfix + @""",
+                        ""name"": """ + ECS + @".Gen." + postfix + @""",
                         ""references"": [
                             ""{{CONTENT}}""
                             ],
@@ -559,6 +569,9 @@ namespace ME.BECS.Editor {
                 var newContent = template.Replace("{{CONTENT}}", string.Join(@""",""", content));
                 var prevContent = System.IO.File.Exists(path) == true ? System.IO.File.ReadAllText(path) : string.Empty;
                 if (prevContent != newContent) {
+                    var pathDummy = @$"{dir}/{ECS}.Dummy.cs";
+                    System.IO.File.WriteAllText(pathDummy, "// Code generator dummy script");
+                    System.IO.File.WriteAllText(csc, "@Assets/csc.rsp");
                     System.IO.File.WriteAllText(path, newContent);
                     UnityEditor.AssetDatabase.ImportAsset(path);
                 }

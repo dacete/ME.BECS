@@ -1,7 +1,13 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
+
 namespace ME.BECS.Pathfinding {
 
-    using Unity.Mathematics;
-    
     public struct AgentComponent : IComponent {
 
         public Filter filter;
@@ -30,7 +36,7 @@ namespace ME.BECS.Pathfinding {
     public struct TargetPathComponent : IComponent {
 
         public Path path;
-        public MemArrayAuto<bool> chunksToUpdate;
+        public MemArrayAuto<byte> chunksToUpdate;
 
     }
 

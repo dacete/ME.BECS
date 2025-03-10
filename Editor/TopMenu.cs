@@ -23,6 +23,20 @@ namespace ME.BECS.Editor {
             CodeGenerator.GenerateComponentsParallelFor();
             
         }
+        
+        [UnityEditor.MenuItem("ME.BECS/Internal/Print Allocations")]
+        public static void PrintAllocations() {
+            
+            LeakDetector.PrintAllocated();
+            
+        }
+        
+        [UnityEditor.MenuItem("ME.BECS/Internal/Generate Fp")]
+        public static void GenerateFp() {
+            
+            FpCodeGenerator.Generate();
+            
+        }
         #endif
 
     }

@@ -1,8 +1,14 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
 
 namespace ME.BECS.Pathfinding {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using Unity.Mathematics;
     using ME.BECS.Transforms;
     using Unity.Jobs;
     using ME.BECS.Jobs;
@@ -49,7 +55,7 @@ namespace ME.BECS.Pathfinding {
         public float3 position;
         public uint chunkWidth;
         public uint chunkHeight;
-        public float nodeSize;
+        public tfloat nodeSize;
         public uint chunksCountX;
         public uint chunksCountY;
 
@@ -58,11 +64,11 @@ namespace ME.BECS.Pathfinding {
     [System.Serializable]
     public struct Filter {
 
-        public bool ignoreNonWalkable;
+        public byte ignoreNonWalkable;
         public NodeFlag flags;
 
         public readonly bool IsValid(in Node node) {
-            if (this.ignoreNonWalkable == false && node.walkable == false) return false;
+            if (this.ignoreNonWalkable == 0 && node.walkable == false) return false;
             if (node.flags == 0) return true;
             return ((uint)this.flags & node.flags) != 0;
         }
@@ -71,7 +77,7 @@ namespace ME.BECS.Pathfinding {
 
     public struct ChunkCache {
 
-        [StructLayout(LayoutKind.Explicit)]
+        [StructLayout(LayoutKind.Explicit, Size = 8)]
         public struct PortalPair {
 
             [FieldOffset(0)]
@@ -107,7 +113,7 @@ namespace ME.BECS.Pathfinding {
         public void InvalidateCache(ref MemoryAllocator allocator, PortalInfo fromPortalId, PortalInfo toPortalId) {
             this.lockSpinner.Lock();
             var chunk = this.data.GetValueAndRemove(ref allocator, new PortalPair(fromPortalId, toPortalId).pack);
-            if (chunk.flowField.isCreated == true) chunk.flowField.Dispose(ref allocator);
+            if (chunk.flowField.IsCreated == true) chunk.flowField.Dispose(ref allocator);
             this.lockSpinner.Unlock();
         }
 
@@ -145,22 +151,17 @@ namespace ME.BECS.Pathfinding {
         }
 
         [INLINE(256)]
-        public static unsafe ChunkCache Create(State* state, uint capacity) {
+        public static unsafe ChunkCache Create(safe_ptr<State> state, uint capacity) {
             return new ChunkCache() {
-                data = new EquatableDictionary<ulong, Path.Chunk>(ref state->allocator, capacity),
+                data = new EquatableDictionary<ulong, Path.Chunk>(ref state.ptr->allocator, capacity),
             };
         }
 
     }
 
-    public struct Heights {
+    public unsafe struct Heights {
 
         private GraphHeights data;
-        
-        [INLINE(256)]
-        public JobHandle Dispose(JobHandle jobHandle) {
-            return this.data.Dispose(jobHandle);
-        }
 
         [INLINE(256)]
         public void Dispose() {
@@ -168,18 +169,18 @@ namespace ME.BECS.Pathfinding {
         }
 
         [INLINE(256)]
-        public static Heights CreateDefault(Unity.Collections.Allocator allocator) {
+        public static Heights CreateDefault(World world) {
             return new Heights() {
                 data = new GraphHeights() {
-                    heightMap = new Unity.Collections.NativeArray<float>(1, allocator),
+                    heightMap = new MemArray<tfloat>(ref world.state.ptr->allocator, 1u),
                 },
             };
         }
 
         [INLINE(256)]
-        public static Heights Create(float3 offset, UnityEngine.TerrainData terrain, Unity.Collections.Allocator allocator) {
+        public static Heights Create(float3 offset, UnityEngine.TerrainData terrain, World world) {
             return new Heights() {
-                data = new GraphHeights(offset, terrain, allocator),
+                data = new GraphHeights(offset, terrain, world),
             };
         }
 
@@ -189,13 +190,13 @@ namespace ME.BECS.Pathfinding {
         }
 
         [INLINE(256)]
-        public readonly float GetHeight(float3 worldPosition) {
+        public readonly tfloat GetHeight(float3 worldPosition) {
             if (this.data.heightMap.Length == 1) return 0f;
             return this.data.SampleHeight(worldPosition);
         }
 
         [INLINE(256)]
-        public readonly float GetHeight(float3 worldPosition, out float3 normal) {
+        public readonly tfloat GetHeight(float3 worldPosition, out float3 normal) {
             normal = math.up();
             if (this.data.heightMap.Length == 1) return 0f;
             return this.data.SampleHeight(worldPosition, out normal);
@@ -210,7 +211,7 @@ namespace ME.BECS.Pathfinding {
         public uint flags;
         public int cost;
         public ObstacleChannel obstacleChannel;
-        public float height;
+        public tfloat height;
         public float3 normal;
 
     }
@@ -285,14 +286,14 @@ namespace ME.BECS.Pathfinding {
             public struct Item {
 
                 public byte direction;
-                public bool hasLineOfSight;
-                public float bestCost;
+                public byte hasLineOfSight;
+                public tfloat bestCost;
 
             }
 
             public uint index;
             public MemArray<Item> flowField;
-            public bool hasLOS;
+            public byte hasLineOfSight;
 
             [INLINE(256)]
             public readonly Chunk Clone(ref MemoryAllocator allocator) {
@@ -311,19 +312,19 @@ namespace ME.BECS.Pathfinding {
         public float3 to;
         public Filter filter;
 
-        public bool IsCreated => this.graph.IsAlive() == true && this.from.IsValid() == true && this.chunks.isCreated == true;
+        public bool IsCreated => this.graph.IsAlive() == true && this.from.IsValid() == true && this.chunks.IsCreated == true;
 
         [INLINE(256)]
         public void Dispose(in World world) {
 
             for (uint i = 0; i < this.chunks.Length; ++i) {
                 var chunk = this.chunks[world.state, i];
-                chunk.flowField.Dispose(ref world.state->allocator);
+                chunk.flowField.Dispose(ref world.state.ptr->allocator);
             }
 
-            this.from.As(in world.state->allocator).Dispose(ref world.state->allocator);
-            this.from.Dispose(ref world.state->allocator);
-            this.chunks.Dispose(ref world.state->allocator);
+            this.from.As(in world.state.ptr->allocator).Dispose(ref world.state.ptr->allocator);
+            this.from.Dispose(ref world.state.ptr->allocator);
+            this.chunks.Dispose(ref world.state.ptr->allocator);
             this = default;
 
         }
@@ -334,7 +335,7 @@ namespace ME.BECS.Pathfinding {
 
         public bool isClosed;
         public bool isOpened;
-        public float startToCurNodeLen;
+        public tfloat startToCurNodeLen;
         public uint parent;
 
     }

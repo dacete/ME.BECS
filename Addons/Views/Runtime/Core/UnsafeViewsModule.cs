@@ -5,25 +5,26 @@ namespace ME.BECS.Views {
     using g = System.Collections.Generic;
     using BURST = Unity.Burst.BurstCompileAttribute;
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using Unity.Jobs;
     using Unity.Collections.LowLevel.Unsafe;
+    using ME.BECS.Jobs;
+    using Unity.Jobs;
     using static Cuts;
 
     public unsafe interface IViewProvider<TEntityView> where TEntityView : IView {
 
         void Initialize(uint providerId, World viewsWorld, ViewsModuleProperties properties);
-        JobHandle Spawn(ViewsModuleData* data, JobHandle dependsOn);
-        JobHandle Despawn(ViewsModuleData* data, JobHandle dependsOn);
+        JobHandle Spawn(safe_ptr<ViewsModuleData> data, JobHandle dependsOn);
+        JobHandle Despawn(safe_ptr<ViewsModuleData> data, JobHandle dependsOn);
         /// <summary>
         /// Apply Spawn/Despawn commands
         /// </summary>
-        JobHandle Commit(ViewsModuleData* data, JobHandle dependsOn);
-        void Dispose(State* state, ViewsModuleData* data);
+        JobHandle Commit(safe_ptr<ViewsModuleData> data, JobHandle dependsOn);
+        void Dispose(safe_ptr<State> state, safe_ptr<ViewsModuleData> data);
         void ApplyState(in SceneInstanceInfo instanceInfo, in Ent ent);
         void OnUpdate(in SceneInstanceInfo instanceInfo, in Ent ent, float dt);
 
-        public void Load(ViewsModuleData* viewsModuleData, ViewsRegistryData data);
-        public ViewSource Register(ViewsModuleData* viewsModuleData, TEntityView prefab, uint prefabId = 0u, bool checkPrefab = true, bool sceneSource = false);
+        public void Load(safe_ptr<ViewsModuleData> viewsModuleData, BECS.ObjectReferenceRegistryData data);
+        public ViewSource Register(safe_ptr<ViewsModuleData> viewsModuleData, TEntityView prefab, uint prefabId = 0u, bool checkPrefab = true, bool sceneSource = false);
 
         void Query(ref QueryBuilder queryBuilder);
 
@@ -99,14 +100,16 @@ namespace ME.BECS.Views {
 
     }
     
-    public unsafe struct SourceRegistry {
+    public struct SourceRegistry {
 
+        [System.Serializable]
         public struct Info {
 
             public System.IntPtr prefabPtr;
             public uint prefabId;
             public ViewTypeInfo typeInfo;
             public bool sceneSource;
+            public bool isLoaded;
             
             public TypeFlags flags;
 
@@ -180,10 +183,15 @@ namespace ME.BECS.Views {
 
         public struct InfoRef {
 
-            public Info* info;
+            public safe_ptr<Info> info;
 
             public InfoRef(Info info) {
                 this.info = _make(info);
+            }
+
+            public void Dispose() {
+                _free(this.info);
+                this = default;
             }
 
         }
@@ -205,10 +213,13 @@ namespace ME.BECS.Views {
             ++this.Count;
         }
 
-        public void Remove(in MemoryAllocator allocator, uint idx) {
+        public bool Remove(in MemoryAllocator allocator, uint idx) {
             if (this.sparseSet.Remove(in allocator, idx, out var fromIndex, out var toIndex) == true) {
                 --this.Count;
+                return true;
             }
+
+            return false;
         }
 
     }
@@ -220,16 +231,18 @@ namespace ME.BECS.Views {
 
     }
 
-    public unsafe struct SceneInstanceInfo {
+    public struct SceneInstanceInfo {
 
         public System.IntPtr obj;
-        public readonly SourceRegistry.Info* prefabInfo;
+        public readonly safe_ptr<SourceRegistry.Info> prefabInfo;
+        public uint uniqueId;
         public uint index;
 
-        public SceneInstanceInfo(System.IntPtr obj, SourceRegistry.Info* prefabInfo) {
+        public SceneInstanceInfo(System.IntPtr obj, safe_ptr<SourceRegistry.Info> prefabInfo, uint uniqueId) {
             this = default;
             this.obj = obj;
             this.prefabInfo = prefabInfo;
+            this.uniqueId = uniqueId;
             this.index = 0u;
         }
 
@@ -237,7 +250,7 @@ namespace ME.BECS.Views {
 
     public unsafe struct BeginFrameState {
 
-        public State* state;
+        public safe_ptr<State> state;
         public float tickTime;
         public double timeSinceStart;
 
@@ -247,7 +260,7 @@ namespace ME.BECS.Views {
 
         public struct EntityData {
 
-            public Transforms.TransformAspect element;
+            public Ent element;
             public uint version;
 
         }
@@ -260,17 +273,18 @@ namespace ME.BECS.Views {
         public UIntDictionary<uint> renderingOnSceneEntToRenderIndex;
         public UIntDictionary<uint> renderingOnSceneRenderIndexToEnt;
         public MemArray<uint> renderingOnSceneEntToPrefabId;
+        public UnsafeParallelHashMap<uint, uint> toAssign;
         public UnsafeParallelHashMap<uint, bool> toChange;
         public UnsafeParallelHashMap<uint, bool> toRemove;
         public UnsafeParallelHashMap<uint, bool> toAdd;
-        public UnsafeList<bool> dirty;
+        public UnsafeList<byte> dirty;
         public UnsafeList<EntityData> renderingOnSceneEnts;
         public List<SceneInstanceInfo> renderingOnScene;
         
         public RenderingSparseList renderingOnSceneApplyState;
         public RenderingSparseList renderingOnSceneUpdate;
-        public uint* applyStateCounter;
-        public uint* updateCounter;
+        public safe_ptr<uint> applyStateCounter;
+        public safe_ptr<uint> updateCounter;
 
         public MemArray<bool> renderingOnSceneApplyStateCulling;
         public MemArray<bool> renderingOnSceneUpdateCulling;
@@ -283,7 +297,7 @@ namespace ME.BECS.Views {
         
         public World connectedWorld;
         public World viewsWorld;
-        public BeginFrameState* beginFrameState;
+        public safe_ptr<BeginFrameState> beginFrameState;
 
         public Ent camera;
         
@@ -293,6 +307,8 @@ namespace ME.BECS.Views {
                 prefabId = 0u,
                 properties = properties,
                 beginFrameState = _make(new BeginFrameState()),
+                applyStateCounter = _make<uint>(0u),
+                updateCounter = _make<uint>(0u),
                 prefabIdToInfo = new UIntDictionary<SourceRegistry.InfoRef>(ref allocator, properties.instancesRegistryCapacity),
                 instanceIdToPrefabId = new UIntDictionary<uint>(ref allocator, properties.renderingObjectsCapacity),
                 renderingOnSceneCount = 0u,
@@ -301,19 +317,18 @@ namespace ME.BECS.Views {
                 renderingOnSceneUpdate = new RenderingSparseList(ref allocator, properties.renderingObjectsCapacity),
                 renderingOnSceneApplyStateCulling = new MemArray<bool>(ref allocator, entitiesCapacity),
                 renderingOnSceneUpdateCulling = new MemArray<bool>(ref allocator, entitiesCapacity),
-                renderingOnSceneEnts = new UnsafeList<EntityData>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
-                renderingOnSceneBits = new TempBitArray(properties.renderingObjectsCapacity, allocator: Constants.ALLOCATOR_DOMAIN),
+                renderingOnSceneEnts = new UnsafeList<EntityData>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST),
+                renderingOnSceneBits = new TempBitArray(properties.renderingObjectsCapacity, allocator: Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
                 renderingOnSceneEntToRenderIndex = new UIntDictionary<uint>(ref allocator, properties.renderingObjectsCapacity),
                 renderingOnSceneRenderIndexToEnt = new UIntDictionary<uint>(ref allocator, properties.renderingObjectsCapacity),
                 renderingOnSceneEntToPrefabId = new MemArray<uint>(ref allocator, entitiesCapacity),
-                applyStateCounter = _make<uint>(0u),
-                updateCounter = _make<uint>(0u),
-                toChange = new UnsafeParallelHashMap<uint, bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
-                toRemove = new UnsafeParallelHashMap<uint, bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
-                toAdd = new UnsafeParallelHashMap<uint, bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
-                dirty = new UnsafeList<bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
-                toRemoveTemp = new UnsafeList<SceneInstanceInfo>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
-                toAddTemp = new UnsafeList<SpawnInstanceInfo>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_DOMAIN),
+                toAssign = new UnsafeParallelHashMap<uint, uint>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
+                toChange = new UnsafeParallelHashMap<uint, bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
+                toRemove = new UnsafeParallelHashMap<uint, bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
+                toAdd = new UnsafeParallelHashMap<uint, bool>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
+                dirty = new UnsafeList<byte>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
+                toRemoveTemp = new UnsafeList<SceneInstanceInfo>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
+                toAddTemp = new UnsafeList<SpawnInstanceInfo>((int)properties.renderingObjectsCapacity, Constants.ALLOCATOR_PERSISTENT_ST.ToAllocator),
             };
 
         }
@@ -322,18 +337,29 @@ namespace ME.BECS.Views {
             this.camera = camera.ent;
         }
 
-        public void Dispose(State* state) {
+        public void Dispose(safe_ptr<State> state) {
+
+            var e = this.prefabIdToInfo.GetEnumerator(this.viewsWorld);
+            while (e.MoveNext() == true) {
+                var kv = e.Current;
+                kv.value.Dispose();
+            }
             
             _free(ref this.beginFrameState);
             _free(ref this.applyStateCounter);
             _free(ref this.updateCounter);
             if (this.renderingOnSceneEnts.IsCreated == true) this.renderingOnSceneEnts.Dispose();
-            if (this.renderingOnSceneBits.isCreated == true) this.renderingOnSceneBits.Dispose();
+            if (this.renderingOnSceneBits.IsCreated == true) this.renderingOnSceneBits.Dispose();
             if (this.toRemove.IsCreated == true) this.toRemove.Dispose();
             if (this.toAdd.IsCreated == true) this.toAdd.Dispose();
             if (this.dirty.IsCreated == true) this.dirty.Dispose();
+            if (this.toAssign.IsCreated == true) this.toAssign.Dispose();
             if (this.toChange.IsCreated == true) this.toChange.Dispose();
-            
+            if (this.toRemoveTemp.IsCreated == true) this.toChange.Dispose();
+            if (this.toAddTemp.IsCreated == true) this.toChange.Dispose();
+
+            this = default;
+
         }
 
     }
@@ -342,7 +368,7 @@ namespace ME.BECS.Views {
 
         public struct ProviderInfo : IIsCreated {
 
-            public bool isCreated { get; set; }
+            public bool IsCreated { get; set; }
             public uint typeId;
 
         }
@@ -357,7 +383,7 @@ namespace ME.BECS.Views {
             registeredProviders.Data.Resize((int)providerId + 1, NativeArrayOptions.ClearMemory);
 
             ref var item = ref *(registeredProviders.Data.Ptr + providerId);
-            item.isCreated = true;
+            item.IsCreated = true;
             item.typeId = StaticTypes<T>.typeId;
 
         }
@@ -382,6 +408,36 @@ namespace ME.BECS.Views {
         }
 
         [INLINE(256)]
+        public static bool AssignView(in Ent ent, in Ent sourceEnt) {
+
+            if (sourceEnt.TryRead(out ViewComponent viewComponent) == true &&
+                ent.Has<ViewComponent>() == false) {
+
+                // Clean up source entity
+                sourceEnt.Remove<ViewComponent>();
+                sourceEnt.Remove<IsViewRequested>();
+
+                // Assign ent to the current view
+                ent.Set(new AssignViewComponent() {
+                    source = viewComponent.source,
+                    sourceEnt = sourceEnt,
+                });
+                ent.Set(viewComponent);
+                ent.Set(new IsViewRequested());
+                if (viewComponent.source.providerId < registeredProviders.Data.Length) {
+                    ref var item = ref *(registeredProviders.Data.Ptr + viewComponent.source.providerId);
+                    E.IS_CREATED(item);
+                    ent.Set(item.typeId, null);
+                }
+                return true;
+                
+            }
+
+            return false;
+
+        }
+
+        [INLINE(256)]
         public static void DestroyView(in Ent ent) {
 
             ent.Remove<IsViewRequested>();
@@ -393,7 +449,7 @@ namespace ME.BECS.Views {
     [BURST(CompileSynchronously = true)]
     public unsafe struct UnsafeViewsModule<TEntityView> where TEntityView : IView {
 
-        public ViewsModuleData* data;
+        public safe_ptr<ViewsModuleData> data;
         private IViewProvider<TEntityView> provider;
         
         public static UnsafeViewsModule<TEntityView> Create<T>(uint providerId, ref World connectedWorld, T provider, uint entitiesCapacity, ViewsModuleProperties properties) where T : IViewProvider<TEntityView> {
@@ -409,13 +465,13 @@ namespace ME.BECS.Views {
             provider.Initialize(providerId, viewsWorld, properties);
 
             var module = new UnsafeViewsModule<TEntityView> {
-                data = _make(ViewsModuleData.Create(ref viewsWorld.state->allocator, entitiesCapacity, properties)),
+                data = _make(ViewsModuleData.Create(ref viewsWorld.state.ptr->allocator, entitiesCapacity, properties)),
                 provider = provider,
             };
-            module.data->connectedWorld = connectedWorld;
-            module.data->viewsWorld = viewsWorld;
-            WorldStaticCallbacks.RaiseCallback(ref *module.data);
-            module.provider.Load(module.data, ViewsRegistry.data);
+            module.data.ptr->connectedWorld = connectedWorld;
+            module.data.ptr->viewsWorld = viewsWorld;
+            WorldStaticCallbacks.RaiseCallback(ref *module.data.ptr);
+            module.provider.Load(module.data, ObjectReferenceRegistry.data);
             Context.Switch(in prevContext);
             return module;
 
@@ -423,17 +479,18 @@ namespace ME.BECS.Views {
 
         public void Dispose() {
 
-            this.provider.Dispose(this.data->viewsWorld.state, this.data);
-            this.data->Dispose(this.data->viewsWorld.state);
+            var world = this.data.ptr->viewsWorld;
+            this.provider.Dispose(this.data.ptr->viewsWorld.state, this.data);
+            this.data.ptr->Dispose(this.data.ptr->viewsWorld.state);
             _free(this.data);
-            this.data->viewsWorld.Dispose();
+            world.Dispose();
             this = default;
 
         }
 
         public void SetCamera(in CameraAspect camera) {
 
-            this.data->SetCamera(in camera);
+            this.data.ptr->SetCamera(in camera);
 
         }
         
@@ -455,53 +512,66 @@ namespace ME.BECS.Views {
 
         public JobHandle Update(float dt, JobHandle dependsOn) {
 
-            E.IS_CREATED(this.data->connectedWorld);
-            E.IS_CREATED(this.data->viewsWorld);
+            E.IS_CREATED(this.data.ptr->connectedWorld);
+            E.IS_CREATED(this.data.ptr->viewsWorld);
 
-            WorldStaticCallbacks.RaiseCallback(ref *this.data, 1);
-            
-            ref var allocator = ref this.data->viewsWorld.state->allocator;
+            WorldStaticCallbacks.RaiseCallback(ref *this.data.ptr, 1);
+
+            var mode = this.data.ptr->connectedWorld.state.ptr->mode;
+            ref var allocator = ref this.data.ptr->viewsWorld.state.ptr->allocator;
             dependsOn = new Jobs.PrepareJob() {
                 viewsModuleData = this.data,
-                state = this.data->viewsWorld.state,
-                connectedWorld = this.data->connectedWorld,
+                state = this.data.ptr->viewsWorld.state,
+                connectedWorld = this.data.ptr->connectedWorld,
             }.Schedule(dependsOn);
             
             JobHandle toRemoveEntitiesJob;
             {
                 // Update views
+                {
+                    // Assign views first
+                    var query = API.Query(in this.data.ptr->connectedWorld, dependsOn).AsReadonly();
+                    this.provider.Query(ref query);
+                    var toAssignJob = query.Schedule<Jobs.JobAssignViews, AssignViewComponent>(new Jobs.JobAssignViews() {
+                        viewsWorld = this.data.ptr->viewsWorld,
+                        viewsModuleData = this.data,
+                        registeredProviders = UnsafeViewsModule.registeredProviders.Data,
+                        toAssign = this.data.ptr->toAssign.AsParallelWriter(),
+                    });
+                    dependsOn = toAssignJob;
+                }
                 JobHandle toRemoveJob;
                 {
                     // DestroyView() case: Remove views from the scene which don't have ViewComponent, but contained in renderingOnSceneBits (DestroyView called)
-                    var query = API.Query(in this.data->connectedWorld, dependsOn).With<ViewComponent>().Without<IsViewRequested>();
+                    var query = API.Query(in this.data.ptr->connectedWorld, dependsOn).AsReadonly().Without<IsViewRequested>();
                     this.provider.Query(ref query);
-                    toRemoveJob = query.ScheduleParallelFor(new Jobs.JobRemoveFromScene() {
+                    toRemoveJob = query.AsParallel().Schedule<Jobs.JobRemoveFromScene, ViewComponent>(new Jobs.JobRemoveFromScene() {
                         viewsModuleData = this.data,
-                        toRemove = this.data->toRemove.AsParallelWriter(),
+                        toRemove = this.data.ptr->toRemove.AsParallelWriter(),
                         registeredProviders = UnsafeViewsModule.registeredProviders.Data,
                     });
                 }
                 JobHandle toAddJob;
                 {
                     // InstantiateView() case: Add views to the scene which have ViewComponent, but not contained in renderingOnSceneBits
-                    var query = API.Query(in this.data->connectedWorld, dependsOn).With<IsViewRequested>().WithAspect<Transforms.TransformAspect>();
+                    var query = API.Query(in this.data.ptr->connectedWorld, dependsOn).AsReadonly().WithAspect<Transforms.TransformAspect>();
                     this.provider.Query(ref query);
-                    toAddJob = query.ScheduleParallelFor(new Jobs.JobAddToScene() {
-                        state = this.data->viewsWorld.state,
+                    toAddJob = query.AsParallel().Schedule<Jobs.JobAddToScene, IsViewRequested>(new Jobs.JobAddToScene() {
+                        state = this.data.ptr->viewsWorld.state,
                         viewsModuleData = this.data,
-                        toAdd = this.data->toAdd.AsParallelWriter(),
-                        toRemove = this.data->toRemove.AsParallelWriter(),
+                        toAdd = this.data.ptr->toAdd.AsParallelWriter(),
+                        toRemove = this.data.ptr->toRemove.AsParallelWriter(),
                     });
                 }
                 {
                     var handle = JobHandle.CombineDependencies(toRemoveJob, toAddJob);
                     // Add entities which has been destroyed, but contained in renderingOnScene
                     toRemoveEntitiesJob = new Jobs.JobRemoveEntitiesFromScene() {
-                        world = this.data->connectedWorld,
+                        world = this.data.ptr->connectedWorld,
                         viewsModuleData = this.data,
-                        toChange = this.data->toChange.AsParallelWriter(),
-                        toRemove = this.data->toRemove.AsParallelWriter(),
-                    }.Schedule(this.data->renderingOnSceneEnts.Length, JobUtils.GetScheduleBatchCount(this.data->renderingOnSceneEnts.Length), handle);
+                        toChange = this.data.ptr->toChange.AsParallelWriter(),
+                        toRemove = this.data.ptr->toRemove.AsParallelWriter(),
+                    }.Schedule(this.data.ptr->renderingOnSceneEnts.Length, JobUtils.GetScheduleBatchCount(this.data.ptr->renderingOnSceneEnts.Length), handle);
                 }
             }
 
@@ -513,7 +583,7 @@ namespace ME.BECS.Views {
                     var marker = new Unity.Profiling.ProfilerMarker("[Views Module] Update Remove Lists Schedule");
                     marker.Begin();
                     dependsOn = new Jobs.JobDespawnViews() {
-                        viewsWorld = this.data->viewsWorld,
+                        viewsWorld = this.data.ptr->viewsWorld,
                         data = this.data,
                     }.Schedule(dependsOn);
                     marker.End();
@@ -523,8 +593,8 @@ namespace ME.BECS.Views {
                     var marker = new Unity.Profiling.ProfilerMarker("[Views Module] Update Add Lists Schedule");
                     marker.Begin();
                     dependsOn = new Jobs.JobSpawnViews() {
-                        connectedWorld = this.data->connectedWorld,
-                        viewsWorld = this.data->viewsWorld,
+                        connectedWorld = this.data.ptr->connectedWorld,
+                        viewsWorld = this.data.ptr->viewsWorld,
                         data = this.data,
                     }.Schedule(dependsOn);
                     marker.End();
@@ -532,17 +602,17 @@ namespace ME.BECS.Views {
 
             }
             
-            if (this.data->camera.IsAlive() == true) { // Update culling
+            if (this.data.ptr->camera.IsAlive() == true) { // Update culling
 
                 var cullingApplyState = new Jobs.UpdateCullingApplyStateJob() {
-                    state = this.data->viewsWorld.state,
+                    state = this.data.ptr->viewsWorld.state,
                     viewsModuleData = this.data,
-                }.Schedule((int*)this.data->applyStateCounter, 64, dependsOn);
+                }.Schedule((int*)this.data.ptr->applyStateCounter.ptr, 64, dependsOn);
 
                 var cullingUpdateState = new Jobs.UpdateCullingUpdateJob() {
-                    state = this.data->viewsWorld.state,
+                    state = this.data.ptr->viewsWorld.state,
                     viewsModuleData = this.data,
-                }.Schedule((int*)this.data->updateCounter, 64, dependsOn);
+                }.Schedule((int*)this.data.ptr->updateCounter.ptr, 64, dependsOn);
 
                 dependsOn = JobHandle.CombineDependencies(cullingApplyState, cullingUpdateState);
 
@@ -580,13 +650,13 @@ namespace ME.BECS.Views {
                 {
                     var marker = new Unity.Profiling.ProfilerMarker("[Views Module] ApplyState Views");
                     marker.Begin();
-                    for (uint i = 0u; i < this.data->renderingOnSceneApplyState.Count; ++i) {
-                        var entId = this.data->renderingOnSceneApplyState.sparseSet.dense[in allocator, i];
-                        if (this.data->renderingOnSceneApplyStateCulling[in allocator, entId] == true) continue;
-                        var idx = this.data->renderingOnSceneEntToRenderIndex.ReadValue(in allocator, entId);
-                        ref var entData = ref *(this.data->renderingOnSceneEnts.Ptr + idx);
-                        var view = this.data->renderingOnScene[in allocator, idx];
-                        var ent = entData.element.ent;
+                    for (uint i = 0u; i < this.data.ptr->renderingOnSceneApplyState.Count; ++i) {
+                        var entId = this.data.ptr->renderingOnSceneApplyState.sparseSet.dense[in allocator, i];
+                        if (this.data.ptr->renderingOnSceneApplyStateCulling[in allocator, entId] == true) continue;
+                        var idx = this.data.ptr->renderingOnSceneEntToRenderIndex.ReadValue(in allocator, entId);
+                        ref var entData = ref *(this.data.ptr->renderingOnSceneEnts.Ptr + idx);
+                        var view = this.data.ptr->renderingOnScene[in allocator, idx];
+                        var ent = entData.element;
                         if (entData.version != ent.Version) {
                             entData.version = ent.Version;
                             this.provider.ApplyState(in view, in ent);
@@ -598,14 +668,14 @@ namespace ME.BECS.Views {
                 {
                     var marker = new Unity.Profiling.ProfilerMarker("[Views Module] Update Views");
                     marker.Begin();
-                    for (uint i = 0u; i < this.data->renderingOnSceneUpdate.Count; ++i) {
-                        var entId = this.data->renderingOnSceneUpdate.sparseSet.dense[in allocator, i];
-                        if (this.data->renderingOnSceneUpdateCulling[in allocator, entId] == true) continue;
-                        var idx = this.data->renderingOnSceneEntToRenderIndex.ReadValue(in allocator, entId);
-                        ref var entData = ref *(this.data->renderingOnSceneEnts.Ptr + idx);
-                        var view = this.data->renderingOnScene[in allocator, idx];
-                        var ent = entData.element.ent;
-                        if (view.prefabInfo->typeInfo.HasUpdate == true || view.prefabInfo->HasUpdateModules == true) {
+                    for (uint i = 0u; i < this.data.ptr->renderingOnSceneUpdate.Count; ++i) {
+                        var entId = this.data.ptr->renderingOnSceneUpdate.sparseSet.dense[in allocator, i];
+                        if (this.data.ptr->renderingOnSceneUpdateCulling[in allocator, entId] == true) continue;
+                        var idx = this.data.ptr->renderingOnSceneEntToRenderIndex.ReadValue(in allocator, entId);
+                        ref var entData = ref *(this.data.ptr->renderingOnSceneEnts.Ptr + idx);
+                        var view = this.data.ptr->renderingOnScene[in allocator, idx];
+                        var ent = entData.element;
+                        if (view.prefabInfo.ptr->typeInfo.HasUpdate == true || view.prefabInfo.ptr->HasUpdateModules == true) {
                             this.provider.OnUpdate(in view, in ent, dt);
                         }
                     }
@@ -613,17 +683,22 @@ namespace ME.BECS.Views {
                 }
             }
             
-            {
-                // Clean up
-                this.data->toRemoveTemp.Clear();
-                this.data->toAddTemp.Clear();
-                this.data->toChange.Clear();
-                this.data->toAdd.Clear();
-                this.data->toRemove.Clear();
-                this.data->dirty.Clear();
-            }
+            dependsOn = new Jobs.CompleteJob() {
+                mode = mode,
+                viewsModuleData = this.data,
+            }.Schedule(dependsOn);
+            
             return dependsOn;
 
+        }
+
+        public IView GetViewByEntity(in Ent entity) {
+            if (this.data.ptr->renderingOnSceneEntToRenderIndex.TryGetValue(this.data.ptr->viewsWorld.state.ptr->allocator, entity.id, out var index) == true) {
+                var info = this.data.ptr->renderingOnScene[this.data.ptr->viewsWorld.state.ptr->allocator, index];
+                return (IView)System.Runtime.InteropServices.GCHandle.FromIntPtr(info.obj).Target;
+            }
+
+            return null;
         }
 
     }

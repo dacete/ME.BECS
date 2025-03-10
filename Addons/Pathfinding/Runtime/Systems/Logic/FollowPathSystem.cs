@@ -1,12 +1,18 @@
-using ME.BECS.Jobs;
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
 
 namespace ME.BECS.Pathfinding {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using BURST = Unity.Burst.BurstCompileAttribute;
-    using Unity.Mathematics;
-    using Unity.Collections;
+    using ME.BECS.Jobs;
     using ME.BECS.Units;
+    using ME.BECS.Transforms;
 
     [BURST(CompileSynchronously = true)]
     [UnityEngine.Tooltip("Schedule building a path.")]
@@ -15,29 +21,27 @@ namespace ME.BECS.Pathfinding {
 
         public static FollowPathSystem Default => new FollowPathSystem() {
             collisionForce = 15f,
-            avoidanceForce = 1f,
-            cohesionForce = 2f,
+            cohesionForce = 1f,
             separationForce = 1f,
-            alignmentForce = 0.5f,
-            movementForce = 5f,
+            alignmentForce = 1f,
+            movementForce = 1f,
         };
 
-        public float collisionForce;
-        public float avoidanceForce;
-        public float cohesionForce;
-        public float separationForce;
-        public float alignmentForce;
-        public float movementForce;
+        public tfloat collisionForce;
+        public tfloat cohesionForce;
+        public tfloat separationForce;
+        public tfloat alignmentForce;
+        public tfloat movementForce;
         
         [BURST(CompileSynchronously = true)]
-        public struct PathFollowJob : ME.BECS.Jobs.IJobParallelForAspect<Transforms.TransformAspect, UnitAspect> {
+        public struct PathFollowJob : IJobForAspects<TransformAspect, UnitAspect> {
 
             public World world;
-            public float dt;
+            public tfloat dt;
             public BuildGraphSystem buildGraphSystem;
             public FollowPathSystem followPathSystem;
             
-            public void Execute(in JobInfo jobInfo, ref ME.BECS.Transforms.TransformAspect tr, ref UnitAspect unit) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TransformAspect tr, ref UnitAspect unit) {
 
                 var pos = tr.position;
 
@@ -67,7 +71,7 @@ namespace ME.BECS.Pathfinding {
                 }
                 
                 var dir = Graph.GetDirection(in this.world, pos, in path, out var complete);
-                if ((unit.collideWithEnd == true && PathUtils.HasArrived(in tr, in unit) == true) ||
+                if ((unit.collideWithEnd == 1 && PathUtils.HasArrived(in tr, in unit) == true) ||
                     (path.IsCreated == true && complete == true)) {
                     // complete path
                     unit.IsPathFollow = false;
@@ -80,56 +84,55 @@ namespace ME.BECS.Pathfinding {
                 var root = path.graph.Read<RootGraphComponent>();
                 var chunkIndex = Graph.GetChunkIndex(in root, pos, false);
                 if (chunkIndex != uint.MaxValue) {
-                    targetPathComponent.chunksToUpdate[chunkIndex] = true;
+                    targetPathComponent.chunksToUpdate[chunkIndex] = 1;
                 }
 
             }
 
             [INLINE(256)]
-            private void Move(ref ME.BECS.Transforms.TransformAspect tr, ref UnitAspect unit, in float3 movementDirection, bool isMoving) {
+            private void Move(ref TransformAspect tr, ref UnitAspect unit, in float3 movementDirection, bool isMoving) {
 
                 var agent = unit.ent.Read<AgentComponent>();
                 var graph = this.buildGraphSystem.GetGraphByTypeId(unit.typeId);
-                var desiredDirection = math.normalizesafe(movementDirection * this.followPathSystem.movementForce + 
-                                                          unit.componentRuntime.cohesionVector * this.followPathSystem.cohesionForce + 
-                                                          unit.componentRuntime.collisionDirection * this.followPathSystem.collisionForce +
-                                                          unit.componentRuntime.separationVector * this.followPathSystem.separationForce + 
-                                                          unit.componentRuntime.avoidanceVector * this.followPathSystem.avoidanceForce + 
-                                                          unit.componentRuntime.alignmentVector * this.followPathSystem.alignmentForce);
+                var vel = unit.readComponentRuntime.cohesionVector * this.followPathSystem.cohesionForce + 
+                          unit.readComponentRuntime.separationVector * this.followPathSystem.separationForce + 
+                          unit.readComponentRuntime.alignmentVector * this.followPathSystem.alignmentForce +
+                          unit.readComponentRuntime.collisionDirection * this.followPathSystem.collisionForce +
+                          movementDirection * this.followPathSystem.movementForce;
+                var desiredDirection = math.normalizesafe(vel);
 
-                /*{
-                    var prevPos = tr.position;
-                    prevPos.y = 0f;
-                    var newPos = prevPos;
-                    newPos += desiredDirection * unit.speed * this.dt;
-                    var movePos = GraphUtils.GetPositionWithMapBorders(graph, out var collisionDirection, in newPos, in prevPos, in agent.filter);
-                    if (math.all(movePos == prevPos) == true) {
-                        desiredDirection = collisionDirection;
-                    }
-                }*/
                 unit.componentRuntime.desiredDirection = desiredDirection;
-                var lengthSq = math.lengthsq(unit.componentRuntime.desiredDirection);
+                var lengthSq = math.lengthsq(unit.readComponentRuntime.desiredDirection);
                 
-                var force = 0f;
+                tfloat force = 0f;
                 if (lengthSq > math.EPSILON) {
                     this.buildGraphSystem.heights.GetHeight(tr.position, out var unitNormal);
-                    tr.rotation = math.slerp(tr.rotation, quaternion.LookRotation(unit.componentRuntime.desiredDirection, unitNormal), this.dt * unit.rotationSpeed);
-                    var angle = UnityEngine.Vector3.Angle(tr.forward, unit.componentRuntime.desiredDirection);
+                    var rot = tr.rotation;
+                    var toRot = quaternion.LookRotation(unit.readComponentRuntime.desiredDirection, unitNormal);
+                    var maxDegreesDelta = this.dt * unit.readRotationSpeed;
+                    var qAngle = math.angle(rot, toRot);
+                    if (qAngle != 0f) {
+                        toRot = math.slerp(rot, toRot, math.min(1.0f, maxDegreesDelta / qAngle));
+                    }
+                    tr.rotation = toRot;
+                    var angle = mathext.angle(tr.forward, unit.readComponentRuntime.desiredDirection);
                     force = 1f - angle / 180f;
                 }
 
                 if (isMoving == false && lengthSq <= math.EPSILON) {
-                    unit.speed = math.lerp(unit.speed, 0f, this.dt * unit.decelerationSpeed);
+                    unit.speed = math.lerp(unit.readSpeed, 0f, this.dt * unit.readDecelerationSpeed);
                 } else {
-                    var accSpeed = unit.accelerationSpeed;
-                    unit.speed = math.lerp(unit.speed, math.select(0f, math.select(unit.speed * 0.5f, unit.maxSpeed, force * 0.5f > 0.4f), force > 0.5f), this.dt * accSpeed);
+                    var accSpeed = unit.readAccelerationSpeed;
+                    unit.speed = math.lerp(unit.readSpeed, math.select(0f, math.select(unit.readSpeed * 0.5f, unit.readMaxSpeed, force * 0.5f > 0.4f), force > 0.5f), this.dt * accSpeed);
                 }
 
                 {
                     var prevPos = tr.position;
                     prevPos.y = 0f;
                     var newPos = prevPos;
-                    newPos += tr.forward * unit.speed * this.dt;
+                    //newPos += tr.forward * unit.speed * this.dt;
+                    newPos = Math.MoveTowards(newPos, newPos + unit.componentRuntime.desiredDirection, unit.readSpeed * this.dt);
+                    //newPos += unit.componentRuntime.collisionDirection * (this.followPathSystem.collisionForce * this.dt);
                     newPos = GraphUtils.GetPositionWithMapBorders(graph, out var collisionDirection, in newPos, in prevPos, in agent.filter);
                     unit.velocity = newPos - prevPos;
                     var delta = collisionDirection * this.followPathSystem.collisionForce * this.dt;
@@ -145,15 +148,31 @@ namespace ME.BECS.Pathfinding {
 
         }
 
+        [BURST(CompileSynchronously = true)]
+        public struct SpeedDownOnHoldJob : IJobForAspects<UnitAspect> {
+
+            public tfloat dt;
+            
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref UnitAspect unit) {
+                
+                unit.speed = math.lerp(unit.readSpeed, 0f, this.dt * unit.readDecelerationSpeed);
+                
+            }
+
+        }
+
         public void OnUpdate(ref SystemContext context) {
 
-            var dependsOn = API.Query(in context).Without<IsUnitStaticComponent>().Schedule<PathFollowJob, Transforms.TransformAspect, UnitAspect>(new PathFollowJob() {
+            var dependsOnFollow = context.Query().Without<IsUnitStaticComponent>().Without<UnitHoldComponent>().AsUnsafe().AsParallel().Schedule<PathFollowJob, TransformAspect, UnitAspect>(new PathFollowJob() {
                 world = context.world,
                 dt = context.deltaTime,
                 buildGraphSystem = context.world.GetSystem<BuildGraphSystem>(),
                 followPathSystem = this,
             });
-            context.SetDependency(dependsOn);
+            var dependsOnStop = context.Query().Without<IsUnitStaticComponent>().With<UnitHoldComponent>().AsUnsafe().AsParallel().Schedule<SpeedDownOnHoldJob, UnitAspect>(new SpeedDownOnHoldJob() {
+                dt = context.deltaTime,
+            });
+            context.SetDependency(Unity.Jobs.JobHandle.CombineDependencies(dependsOnFollow, dependsOnStop));
             
         }
 

@@ -1,10 +1,20 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+#endif
+
 namespace ME.BECS.Transforms {
 
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using Unity.Mathematics;
     using System.Runtime.InteropServices;
     using LAYOUT = System.Runtime.InteropServices.StructLayoutAttribute;
 
+    [EditorComment("Give access to the transform methods")]
     public struct TransformAspect : IAspect {
         
         public Ent ent { get; set; }
@@ -17,10 +27,12 @@ namespace ME.BECS.Transforms {
         internal AspectDataPtr<ParentComponent> parentData;
         internal AspectDataPtr<ChildrenComponent> childrenData;
         [QueryWith]
+        internal AspectDataPtr<LocalMatrixComponent> localMatrixData;
+        [QueryWith]
         internal AspectDataPtr<WorldMatrixComponent> worldMatrixData;
 
-        public bool IsCalculated => this.worldMatrixData.Read(this.ent.id, this.ent.gen).calculated == 1;
-        
+        public readonly bool IsCalculated => math.all(math.isnan(this.GetWorldMatrixRotation().value)) == false;
+
         public readonly float3 forward {
             [INLINE(256)] get => math.mul(this.rotation, math.forward());
             [INLINE(256)] set => this.rotation = MatrixUtils.FromToRotation(math.forward(), value); 
@@ -60,12 +72,11 @@ namespace ME.BECS.Transforms {
         public readonly ref readonly Ent parent => ref this.parentData.Read(this.ent.id, this.ent.gen).value;
         public readonly ref readonly ListAuto<Ent> children => ref this.childrenData.Read(this.ent.id, this.ent.gen).list;
         public readonly ref float4x4 worldMatrix => ref this.worldMatrixData.Get(this.ent.id, this.ent.gen).value;
+        public readonly ref float4x4 localMatrix => ref this.localMatrixData.Get(this.ent.id, this.ent.gen).value;
 
         public readonly ref readonly float4x4 readWorldMatrix => ref this.worldMatrixData.Read(this.ent.id, this.ent.gen).value;
-        public readonly float4x4 localMatrix => float4x4.TRS(this.localPositionData.Read(this.ent.id, this.ent.gen).value, this.localRotationData.Read(this.ent.id, this.ent.gen).value, this.localScaleData.Read(this.ent.id, this.ent.gen).value);
+        public readonly ref readonly float4x4 readLocalMatrix => ref this.localMatrixData.Read(this.ent.id, this.ent.gen).value;
 
-        public readonly ref byte worldMatrixCalculated => ref this.worldMatrixData.Get(this.ent.id, this.ent.gen).calculated;
-        
         public readonly float3 position {
             [INLINE(256)]
             set {
@@ -92,7 +103,7 @@ namespace ME.BECS.Transforms {
                         worldRot = quaternion.identity;
                     }
                     position = math.mul(worldRot, GetScale_INTERNAL(in container) * position);
-                    position += parentTr.localPosition;
+                    position += parentTr.readLocalPosition;
                     container = ref parentTr.parent;
                 }
                 return position;
@@ -185,24 +196,14 @@ namespace ME.BECS.Transforms {
         public readonly float3 GetWorldMatrixScale() => MatrixUtils.GetScale(in this.readWorldMatrix);
 
         [INLINE(256)]
-        public readonly UnityEngine.Bounds GetBounds() {
-            return new UnityEngine.Bounds(this.GetWorldMatrixPosition(), new UnityEngine.Vector3(1f, 1f, 1f));
+        public readonly Bounds GetBounds() {
+            return new Bounds(this.GetWorldMatrixPosition(), new float3(1f, 1f, 1f));
         }
 
         [INLINE(256)]
         public static implicit operator TransformAspect(in Ent ent) {
             if (ent.IsAlive() == false) return default;
             return ent.GetOrCreateAspect<TransformAspect>();
-        }
-
-        public static void TestInitialize(in World world) {
-            ref var tr = ref world.InitializeAspect<TransformAspect>();
-            tr.localPositionData = new AspectDataPtr<LocalPositionComponent>(in world);
-            tr.localRotationData = new AspectDataPtr<LocalRotationComponent>(in world);
-            tr.localScaleData = new AspectDataPtr<LocalScaleComponent>(in world);
-            tr.parentData = new AspectDataPtr<ParentComponent>(in world);
-            tr.childrenData = new AspectDataPtr<ChildrenComponent>(in world);
-            tr.worldMatrixData = new AspectDataPtr<WorldMatrixComponent>(in world);
         }
 
     }

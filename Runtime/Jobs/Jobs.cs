@@ -6,71 +6,95 @@ namespace ME.BECS {
     using System.Runtime.InteropServices;
     using Unity.Collections.LowLevel.Unsafe;
     using Unity.Jobs.LowLevel.Unsafe;
+    using Unity.Collections;
     using Unity.Jobs;
 
+    public enum ScheduleFlags {
+
+        None = 0,
+        Single = 1 << 0,
+        Parallel = 1 << 1,
+        
+        IsReadonly = 1 << 4,
+
+    }
+    
+    public interface IJobParallelForAspectsComponentsBase { }
     public interface IJobParallelForComponentsBase { }
-    public interface IJobParallelForAspectBase { }
-    public interface IJobComponentsBase { }
-    public interface IJobAspectBase { }
+    public interface IJobParallelForAspectsBase { }
+    public interface IJobForAspectsComponentsBase { }
+    public interface IJobForComponentsBase { }
+    public interface IJobForAspectsBase { }
+
+    public struct JobReflectionData<T> {
+        internal static readonly Unity.Burst.SharedStatic<System.IntPtr> data = Unity.Burst.SharedStatic<System.IntPtr>.GetOrCreate<JobReflectionData<T>>();
+    }
+
+    #if ENABLE_UNITY_COLLECTIONS_CHECKS && ENABLE_BECS_COLLECTIONS_CHECKS
+    public struct JobReflectionUnsafeData<T> {
+        internal static readonly Unity.Burst.SharedStatic<System.IntPtr> data = Unity.Burst.SharedStatic<System.IntPtr>.GetOrCreate<JobReflectionUnsafeData<T>>();
+    }
+    #endif
 
     public struct JobInfo : IIsCreated {
 
         public uint count;
-        public uint index;
-        public uint itemsPerThread;
+        public volatile uint index;
+        public volatile uint itemsPerThread;
+        public ushort worldId;
 
-        public bool isCreated { private set; get; }
+        public bool IsCreated => this.worldId > 0;
 
         public uint Offset => this.index * this.itemsPerThread;
 
-        public static JobInfo Create() {
+        public static JobInfo Create(ushort worldId) {
             return new JobInfo() {
-                isCreated = true,
                 itemsPerThread = 1u,
+                worldId = worldId,
             };
         }
 
     }
     
     [BURST(CompileSynchronously = true)]
-    public unsafe struct DisposeJob : Unity.Jobs.IJob {
+    public unsafe struct DisposeJob : IJob {
         public MemPtr ptr;
         public ushort worldId;
-        public void Execute() => Worlds.GetWorld(this.worldId).state->allocator.Free(this.ptr);
+        public void Execute() => Worlds.GetWorld(this.worldId).state.ptr->allocator.Free(this.ptr);
     }
 
     [BURST(CompileSynchronously = true)]
-    public unsafe struct DisposeAutoJob : Unity.Jobs.IJob {
+    public unsafe struct DisposeAutoJob : IJob {
         public MemPtr ptr;
         public Ent ent;
         public ushort worldId;
 
         public void Execute() {
             var state = Worlds.GetWorld(this.worldId).state;
-            state->collectionsRegistry.Remove(state, in this.ent, in this.ptr);
-            state->allocator.Free(this.ptr);
+            CollectionsRegistry.Remove(state, in this.ent, in this.ptr);
+            state.ptr->allocator.Free(this.ptr);
         }
 
     }
 
     [BURST(CompileSynchronously = true)]
-    public unsafe struct DisposePtrJob : Unity.Jobs.IJob {
+    public unsafe struct DisposePtrJob : IJob {
         [NativeDisableUnsafePtrRestriction]
-        public void* ptr;
+        public safe_ptr ptr;
         public void Execute() => _free(ref this.ptr);
     }
 
     [BURST(CompileSynchronously = true)]
-    public unsafe struct DisposeWithAllocatorPtrJob : Unity.Jobs.IJob {
+    public unsafe struct DisposeWithAllocatorPtrJob : IJob {
 
-        public Unity.Collections.AllocatorManager.AllocatorHandle allocator;
+        public AllocatorManager.AllocatorHandle allocator;
         [NativeDisableUnsafePtrRestriction]
-        public void* ptr;
-        public void Execute() => Unity.Collections.AllocatorManager.Free(this.allocator, this.ptr);
+        public safe_ptr ptr;
+        public void Execute() => _free(this.ptr, this.allocator.ToAllocator);
 
     }
 
-    public struct DisposeHandleJob : Unity.Jobs.IJob {
+    public struct DisposeHandleJob : IJob {
         public GCHandle gcHandle;
         public void Execute() {
             if (this.gcHandle.IsAllocated == true) this.gcHandle.Free();
@@ -79,15 +103,16 @@ namespace ME.BECS {
 
     public struct JobSingleThread {
 
-        public static readonly Unity.Burst.SharedStatic<ME.BECS.Internal.ArrayCacheLine<byte>> singleThreadsBurst = Unity.Burst.SharedStatic<ME.BECS.Internal.ArrayCacheLine<byte>>.GetOrCreate<JobSingleThread>();
-        public static ref ME.BECS.Internal.ArrayCacheLine<byte> singleThreads => ref singleThreadsBurst.Data;
+        public static readonly Unity.Burst.SharedStatic<Internal.ArrayCacheLine<byte>> singleThreadsBurst = Unity.Burst.SharedStatic<Internal.ArrayCacheLine<byte>>.GetOrCreate<JobSingleThread>();
+        public static ref Internal.ArrayCacheLine<byte> singleThreads => ref singleThreadsBurst.Data;
         
     }
 
     public static unsafe class JobUtils {
 
         public const uint CacheLineSize = JobsUtility.CacheLineSize;
-        public static readonly uint ThreadsCount = (uint)Unity.Jobs.LowLevel.Unsafe.JobsUtility.ThreadIndexCount;
+        public static uint ThreadsCount => (uint)JobsUtility.ThreadIndexCount;
+        public static uint ThreadIndex => (uint)JobsUtility.ThreadIndex;
 
         public static void Initialize() {
             CleanUp();
@@ -146,6 +171,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static bool SetIfSmaller(ref int target, int newValue) {
+            E.ADDR_4(ref target);
             int snapshot;
             bool stillLess;
             do {
@@ -158,6 +184,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static bool SetIfGreater(ref int target, int newValue) {
+            E.ADDR_4(ref target);
             int snapshot;
             bool stillMore;
             do {
@@ -170,6 +197,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static bool SetIfGreater(ref uint target, uint newValue) {
+            E.ADDR_4(ref target);
             int snapshot;
             bool stillMore;
             do {
@@ -182,6 +210,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static bool SetIfGreater(ref float target, float newValue) {
+            E.ADDR_4(ref target);
             float snapshot;
             bool stillMore;
             do {
@@ -193,7 +222,21 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
+        public static bool SetIfGreater(ref sfloat target, sfloat newValue) {
+            E.ADDR_4(ref target);
+            sfloat snapshot;
+            bool stillMore;
+            do {
+                snapshot = target;
+                stillMore = newValue > snapshot;
+            } while (stillMore && (sfloat)System.Threading.Interlocked.CompareExchange(ref _as<sfloat, float>(ref target), (float)newValue, (float)snapshot) != snapshot);
+
+            return stillMore;
+        }
+
+        [INLINE(256)]
         public static bool SetIfGreaterOrEquals(ref int target, int newValue) {
+            E.ADDR_4(ref target);
             int snapshot;
             bool stillMore;
             do {
@@ -206,21 +249,25 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static uint Increment(ref uint value) {
+            E.ADDR_4(ref value);
             return (uint)System.Threading.Interlocked.Increment(ref _as<uint, int>(ref value));
         }
 
         [INLINE(256)]
         public static int Increment(ref int value) {
+            E.ADDR_4(ref value);
             return System.Threading.Interlocked.Increment(ref value);
         }
 
         [INLINE(256)]
         public static uint Decrement(ref uint value) {
+            E.ADDR_4(ref value);
             return (uint)System.Threading.Interlocked.Decrement(ref _as<uint, int>(ref value));
         }
 
         [INLINE(256)]
         public static void Increment(ref float value, float count) {
+            E.ADDR_4(ref value);
             float initialValue;
             float computedValue;
             do {
@@ -230,7 +277,19 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
+        public static void Increment(ref sfloat value, sfloat count) {
+            E.ADDR_4(ref value);
+            sfloat initialValue;
+            sfloat computedValue;
+            do {
+                initialValue = value;
+                computedValue = initialValue + count;
+            } while (initialValue != System.Threading.Interlocked.CompareExchange(ref _as<sfloat, float>(ref value), (float)computedValue, (float)initialValue));
+        }
+
+        [INLINE(256)]
         public static void Increment(ref int value, int count) {
+            E.ADDR_4(ref value);
             int initialValue;
             int computedValue;
             do {
@@ -241,6 +300,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static void Increment(ref uint value, uint count) {
+            E.ADDR_4(ref value);
             int initialValue;
             int computedValue;
             do {
@@ -251,6 +311,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static void Decrement(ref int value, int count) {
+            E.ADDR_4(ref value);
             int initialValue;
             int computedValue;
             do {
@@ -261,6 +322,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static void Decrement(ref float value, float count) {
+            E.ADDR_4(ref value);
             float initialValue;
             float computedValue;
             do {
@@ -271,6 +333,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static void Decrement(ref uint value, uint count) {
+            E.ADDR_4(ref value);
             int initialValue;
             int computedValue;
             do {
@@ -281,6 +344,7 @@ namespace ME.BECS {
 
         [INLINE(256)]
         public static void Decrement(ref uint value, int count) {
+            E.ADDR_4(ref value);
             int initialValue;
             int computedValue;
             do {

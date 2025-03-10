@@ -11,9 +11,9 @@ namespace ME.BECS {
         public uint hash;
         public uint Count;
 
-        public readonly bool isCreated {
+        public readonly bool IsCreated {
             [INLINE(256)]
-            get => this.arr.isCreated;
+            get => this.arr.IsCreated;
         }
 
         public uint Capacity {
@@ -25,11 +25,10 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public UIntListHash(ref MemoryAllocator allocator, uint capacity, ushort growFactor = 1) {
+        public UIntListHash(ref MemoryAllocator allocator, uint capacity) {
 
             if (capacity <= 0u) capacity = 1u;
             this = default;
-            this.arr.growFactor = growFactor;
             this.EnsureCapacity(ref allocator, capacity);
 
         }
@@ -48,7 +47,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public readonly void* GetUnsafePtr(in MemoryAllocator allocator) {
+        public readonly safe_ptr GetUnsafePtr(in MemoryAllocator allocator) {
 
             E.IS_CREATED(this);
             return this.arr.GetUnsafePtr(in allocator);
@@ -101,8 +100,7 @@ namespace ME.BECS {
         public bool EnsureCapacity(ref MemoryAllocator allocator, uint capacity) {
 
             capacity = Helpers.NextPot(capacity);
-            if (this.arr.isCreated == false) this.arr.growFactor = 1;
-            return this.arr.Resize(ref allocator, capacity, ClearOptions.UninitializedMemory);
+            return this.arr.Resize(ref allocator, capacity, 2, ClearOptions.UninitializedMemory);
             
         }
         
@@ -237,7 +235,8 @@ namespace ME.BECS {
             int dstIndex,
             uint length) {
             System.Runtime.InteropServices.GCHandle gcHandle = System.Runtime.InteropServices.GCHandle.Alloc(dst, System.Runtime.InteropServices.GCHandleType.Pinned);
-            _memcpy((void*)((System.IntPtr)src.GetUnsafePtr(in allocator) + srcIndex * TSize<uint>.sizeInt), (void*)((System.IntPtr) (void*)gcHandle.AddrOfPinnedObject() + dstIndex * TSize<uint>.sizeInt), length * TSize<uint>.size);
+            var dstPtr = new safe_ptr((void*)gcHandle.AddrOfPinnedObject(), length * TSize<uint>.size);
+            _memcpy(src.GetUnsafePtr(in allocator) + srcIndex * TSize<uint>.sizeInt, dstPtr + dstIndex * TSize<uint>.sizeInt, length * TSize<uint>.size);
             gcHandle.Free();
         }
 

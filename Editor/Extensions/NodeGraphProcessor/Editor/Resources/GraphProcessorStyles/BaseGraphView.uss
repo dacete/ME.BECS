@@ -175,3 +175,67 @@
 .node-required-dependency-checked .node-required-dependency-true {
     display: flex;
 }
+
+
+.mainContainer > #centralContainer {
+    background-color: rgba(45, 45, 45, 1);
+}
+
+.scope {
+    border-color: #1a1a1a;
+}
+
+.default-value {
+    position: absolute;
+    margin-left: -70px;
+    width: 60px;
+    -unity-font-style: normal;
+}
+
+.default-value PropertyField .unity-object-field__label,
+.default-value PropertyField .unity-property-field__label{
+    display: none;
+}
+
+PortView.connected .default-value {
+    display: none;
+}
+
+GridBackground {
+    --line-color: rgba(255, 255, 255, 0.02);
+    --spacing: 4;
+    --thick-line-color: rgba(255, 255, 255, 0.05);
+    --thick-lines: 1;
+}
+
+
+
+.graph-node .subclass-selector-container {
+    display: none;
+}
+
+
+.not-editable #title Toggle {
+    display: none;
+}
+
+.editable-lock {
+    position: absolute;
+    top: 40px;
+    width: 70px;
+    height: 70px;
+    opacity: 0.5;
+}
+
+.editable-lock .editable-header {
+    position: absolute;
+    left: 70px;
+    font-size: 40px;
+    -unity-font-style: bold;
+}
+
+.editable-lock .editable-description {
+    position: absolute;
+    left: 70px;
+    top: 50px;
+}

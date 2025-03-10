@@ -1,23 +1,31 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+#endif
 
 namespace ME.BECS.Bullets {
     
     using BURST = Unity.Burst.BurstCompileAttribute;
     using ME.BECS.Jobs;
     using ME.BECS.Transforms;
-    using Unity.Mathematics;
 
     [BURST(CompileSynchronously = true)]
     [UnityEngine.Tooltip("Bullet fly system")]
     public struct FlySystem : IUpdate {
 
         [BURST(CompileSynchronously = true)]
-        public struct FlyJob : ME.BECS.Jobs.IJobParallelForAspect<BulletAspect, TransformAspect> {
+        public struct FlyJob : IJobForAspects<BulletAspect, TransformAspect> {
 
-            public float dt;
+            public tfloat dt;
             
-            public void Execute(in JobInfo jobInfo, ref BulletAspect aspect, ref TransformAspect tr) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref BulletAspect aspect, ref TransformAspect tr) {
 
-                if (aspect.config.autoTarget == true && aspect.component.targetEnt.IsAlive() == true) {
+                if (aspect.config.autoTarget == 1 && aspect.component.targetEnt.IsAlive() == true) {
                     aspect.component.targetWorldPos = aspect.component.targetEnt.GetAspect<TransformAspect>().GetWorldMatrixPosition();
                 }
 
@@ -34,7 +42,7 @@ namespace ME.BECS.Bullets {
 
         public void OnUpdate(ref SystemContext context) {
 
-            var dependsOn = context.Query().Without<TargetReachedComponent>().Schedule<FlyJob, BulletAspect, TransformAspect>(new FlyJob() {
+            var dependsOn = context.Query().AsParallel().Without<TargetReachedComponent>().Schedule<FlyJob, BulletAspect, TransformAspect>(new FlyJob() {
                 dt = context.deltaTime,
             });
             context.SetDependency(dependsOn);

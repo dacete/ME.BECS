@@ -3,9 +3,7 @@ namespace ME.BECS.Commands {
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using Units;
     using Pathfinding;
-    using Transforms;
     using Unity.Collections;
-    using Unity.Mathematics;
 
     public static class CommandsUtils {
 
@@ -18,17 +16,18 @@ namespace ME.BECS.Commands {
         /// <param name="data"></param>
         /// <param name="jobInfo"></param>
         [INLINE(256)]
-        public static void SetCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitAspect unit, in T data, JobInfo jobInfo) where T : unmanaged, ICommandComponent {
-            
+        public static UnitCommandGroupAspect SetCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitAspect unit, in T data, in JobInfo jobInfo) where T : unmanaged, ICommandComponent {
+
             // remove from current group
             PathUtils.RemoveUnitFromGroup(in unit);
             // create new group
-            var group = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), jobInfo: jobInfo);
+            var group = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), jobInfo: in jobInfo);
             group.Add(in unit);
             group.ent.Set(data);
             // move unit to target
             //PathUtils.UpdateTarget(in buildGraphSystem, in group, worldPos);
-            
+            return group;
+
         }
 
         /// <summary>
@@ -40,16 +39,17 @@ namespace ME.BECS.Commands {
         /// <param name="data"></param>
         /// <param name="jobInfo"></param>
         [INLINE(256)]
-        public static void SetCommandWithMove<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, JobInfo jobInfo) where T : unmanaged, ICommandComponent {
+        public static UnitCommandGroupAspect SetCommandWithMove<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, in JobInfo jobInfo) where T : unmanaged, ICommandComponent {
             
-            SetCommand(in buildGraphSystem, in selectionGroupAspect, new CommandMove() {
+            var mainGroup = SetCommand(in buildGraphSystem, in selectionGroupAspect, new CommandMove() {
                 targetPosition = data.TargetPosition,
             }, jobInfo);
-            AddCommand(in buildGraphSystem, in selectionGroupAspect, in data, jobInfo);
+            AddCommand(in buildGraphSystem, in selectionGroupAspect, in data, in jobInfo);
             AddCommand(in buildGraphSystem, in selectionGroupAspect, new CommandMove() {
                 targetPosition = data.TargetPosition,
             }, jobInfo);
-            
+            return mainGroup;
+
         }
 
         /// <summary>
@@ -59,16 +59,35 @@ namespace ME.BECS.Commands {
         /// <param name="buildGraphSystem"></param>
         /// <param name="selectionGroupAspect"></param>
         /// <param name="data"></param>
+        /// <param name="jobInfo"></param>
         [INLINE(256)]
-        public static void AddCommandWithMove<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, JobInfo jobInfo) where T : unmanaged, ICommandComponent {
+        public static UnitCommandGroupAspect AddCommandWithMove<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, in JobInfo jobInfo) where T : unmanaged, ICommandComponent {
             
+            var mainGroup = AddCommand(in buildGraphSystem, in selectionGroupAspect, new CommandMove() {
+                targetPosition = data.TargetPosition,
+            }, jobInfo);
+            AddCommand(in buildGraphSystem, in selectionGroupAspect, in data, in jobInfo);
             AddCommand(in buildGraphSystem, in selectionGroupAspect, new CommandMove() {
                 targetPosition = data.TargetPosition,
             }, jobInfo);
-            AddCommand(in buildGraphSystem, in selectionGroupAspect, in data, jobInfo);
-            AddCommand(in buildGraphSystem, in selectionGroupAspect, new CommandMove() {
-                targetPosition = data.TargetPosition,
-            }, jobInfo);
+            return mainGroup;
+
+        }
+
+        /// <summary>
+        /// Clear command chain for all units in selection
+        /// Add new command
+        /// </summary>
+        /// <param name="buildGraphSystem"></param>
+        /// <param name="selectionGroupAspect"></param>
+        /// <param name="data"></param>
+        /// <param name="jobInfo"></param>
+        [INLINE(256)]
+        public static UnitCommandGroupAspect SetCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, in JobInfo jobInfo) where T : unmanaged, ICommandComponent {
+            
+            var commandGroup = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), in selectionGroupAspect, in jobInfo);
+            commandGroup.ent.Set(data);
+            return commandGroup;
             
         }
 
@@ -81,11 +100,11 @@ namespace ME.BECS.Commands {
         /// <param name="data"></param>
         /// <param name="jobInfo"></param>
         [INLINE(256)]
-        public static void SetCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, JobInfo jobInfo) where T : unmanaged, ICommandComponent {
+        public static UnitCommandGroupAspect SetCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionTempGroupAspect selectionGroupAspect, in T data, in JobInfo jobInfo) where T : unmanaged, ICommandComponent {
             
-            var commandGroup = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), in selectionGroupAspect, jobInfo);
+            var commandGroup = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), in selectionGroupAspect, in jobInfo);
             commandGroup.ent.Set(data);
-            //PathUtils.UpdateTarget(in buildGraphSystem, in commandGroup, in worldPos);
+            return commandGroup;
             
         }
 
@@ -97,10 +116,10 @@ namespace ME.BECS.Commands {
         /// <param name="data"></param>
         /// <param name="jobInfo"></param>
         [INLINE(256)]
-        public static void AddCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, JobInfo jobInfo) where T : unmanaged, ICommandComponent {
+        public static UnitCommandGroupAspect AddCommand<T>(in BuildGraphSystem buildGraphSystem, in UnitSelectionGroupAspect selectionGroupAspect, in T data, in JobInfo jobInfo) where T : unmanaged, ICommandComponent {
 
             // get all unique command groups for each unit in current selection
-            var noChainCommandGroup = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), selectionGroupAspect.units.Count, jobInfo);
+            var noChainCommandGroup = UnitUtils.CreateCommandGroup(buildGraphSystem.GetTargetsCapacity(), selectionGroupAspect.units.Count, in jobInfo);
             var uniqueGroups = new NativeHashSet<Ent>((int)selectionGroupAspect.units.Count, Constants.ALLOCATOR_TEMP);
             for (uint i = 0; i < selectionGroupAspect.units.Count; ++i) {
                 var unit = selectionGroupAspect.units[i].GetAspect<UnitAspect>();
@@ -130,6 +149,10 @@ namespace ME.BECS.Commands {
                     UnitUtils.DestroyCommandGroup(in noChainCommandGroup);
                 }
             }
+
+            uniqueGroups.Dispose();
+
+            return noChainCommandGroup;
 
         }
 

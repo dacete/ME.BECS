@@ -17,7 +17,7 @@ namespace ME.BECS.Editor.Aspects {
                 if (this.IsValidTypeForAssembly(aspect) == false) continue;
                 
                 var type = aspect;
-                var strType = GetTypeName(type);
+                var strType = EditorUtils.GetTypeName(type);
                 var types = new System.Collections.Generic.List<string>();
                 var fieldsCount = 0;
                 var fields = type.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
@@ -28,7 +28,7 @@ namespace ME.BECS.Editor.Aspects {
                         ++fieldsCount;
                         var gType = fieldType.GenericTypeArguments[0];
                         if (gType.IsVisible == false) continue;
-                        types.Add(GetTypeName(gType));
+                        types.Add(EditorUtils.GetTypeName(gType));
                         references.Add(gType);
                     }
                 }
@@ -37,10 +37,10 @@ namespace ME.BECS.Editor.Aspects {
                 content.Add(str);
                 if (fieldsCount > 0 && fieldsCount == types.Count) {
                     references.Add(type);
-                    str = $"AspectTypeInfo<{strType}>.with.Resize({types.Count});";
+                    str = $"AspectTypeInfo.with.Get(AspectTypeInfo<{strType}>.typeId).Resize({types.Count});";
                     content.Add(str);
                     for (int i = 0; i < types.Count; ++i) {
-                        str = $"AspectTypeInfo<{strType}>.with.Get({i}) = StaticTypes<{types[i]}>.typeId;";
+                        str = $"AspectTypeInfo.with.Get(AspectTypeInfo<{strType}>.typeId).Get({i}) = StaticTypes<{types[i]}>.typeId;";
                         content.Add(str);
                     }
                 }
@@ -63,10 +63,9 @@ namespace ME.BECS.Editor.Aspects {
                 if (this.IsValidTypeForAssembly(aspect) == false) continue;
 
                 var type = aspect;
-                var strType = GetTypeName(type);
+                var strType = EditorUtils.GetTypeName(type);
                 var types = new System.Collections.Generic.List<string>();
                 var fieldsCount = 0;
-                var i = 0;
                 var fields = type.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic).OrderBy(x => x.FieldType.FullName).ToArray();
                 foreach (var field in fields) {
                     var fieldType = field.FieldType;
@@ -74,8 +73,7 @@ namespace ME.BECS.Editor.Aspects {
                         ++fieldsCount;
                         var gType = fieldType.GenericTypeArguments[0];
                         if (gType.IsVisible == false) continue;
-                        types.Add($"aspect.{field.Name} = new {GetDataTypeName(fieldType)}<{GetTypeName(gType)}>(in world);");
-                        ++i;
+                        types.Add($"aspect.{field.Name} = new {EditorUtils.GetDataTypeName(fieldType)}<{EditorUtils.GetTypeName(gType)}>(in world);");
                     }
                 }
 
@@ -92,6 +90,7 @@ ref var aspect = ref world.InitializeAspect<{strType}>();
             var def = new CodeGenerator.MethodDefinition() {
                 methodName = "AspectsConstruct",
                 type = "World",
+                registerMethodName = "RegisterCallback",
                 definition = "ref World world",
                 content = string.Join("\n", content),
             };

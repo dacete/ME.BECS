@@ -19,28 +19,17 @@ namespace ME.BECS.Jobs {
             System.IntPtr reflectionData = IJobSingleExtensions.JobProcess<T>.jobReflectionData.Data;
             return reflectionData;
         }
-        
-        public static JobHandle ScheduleSingleDeps<T>(this T jobData, JobHandle inputDeps = default) where T : struct, IJobSingle {
-            if (inputDeps.IsCompleted == true) {
-                jobData.Execute();
-                return inputDeps;
-            }
-            
-            var parameters = new JobsUtility.JobScheduleParameters(_address(ref jobData), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
-            return JobsUtility.Schedule(ref parameters);
-            
-        }
 
         public static JobHandle ScheduleSingle<T>(this T jobData, JobHandle inputDeps = default) where T : struct, IJobSingle {
             
-            var parameters = new JobsUtility.JobScheduleParameters(_address(ref jobData), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
+            var parameters = new JobsUtility.JobScheduleParameters(_addressPtr(ref jobData), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
             return JobsUtility.Schedule(ref parameters);
             
         }
 
         public static JobHandle ScheduleSingleByRef<T>(ref this T jobData, JobHandle inputDeps = default) where T : struct, IJobSingle {
             
-            var parameters = new JobsUtility.JobScheduleParameters(_address(ref jobData), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
+            var parameters = new JobsUtility.JobScheduleParameters(_addressPtr(ref jobData), GetReflectionData<T>(), inputDeps, ScheduleMode.Single);
             return JobsUtility.Schedule(ref parameters);
             
         }
@@ -52,7 +41,7 @@ namespace ME.BECS.Jobs {
             [Unity.Burst.BurstDiscardAttribute]
             public static void Initialize() {
                 if (jobReflectionData.Data == System.IntPtr.Zero) {
-                    jobReflectionData.Data = JobsUtility.CreateJobReflectionData(typeof(T), typeof(T), (ExecuteJobFunction)Execute);
+                    jobReflectionData.Data = JobsUtility.CreateJobReflectionData(typeof(T), (object)new ExecuteJobFunction(Execute));
                 }
             }
 

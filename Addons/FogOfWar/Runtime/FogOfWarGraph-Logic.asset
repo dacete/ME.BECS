@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2c47971b42c2144aeb6f0fb81f786410, type: 3}
   m_Name: FogOfWarGraph-Logic
   m_EditorClassIdentifier: 
-  id: 20
+  id: 28
   builtInGraph: 1
   isInnerGraph: 1
   serializedNodes: []
@@ -131,8 +131,6 @@ MonoBehaviour:
   serializedParameterList: []
   stickyNotes: []
   nodeInspectorReference: {fileID: 0}
-  position: {x: 16, y: 681.5, z: 0}
-  scale: {x: 1, y: 1, z: 1}
   references:
     version: 2
     RefIds:
@@ -141,10 +139,8 @@ MonoBehaviour:
     - rid: 1536974532762927105
       type: {class: SystemNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
-        syncPoint: 0
-        syncCount: -7
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
+        syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: db5bcb93-7fe8-405b-a76d-e995a990fcad
         groupGUID: 
@@ -165,10 +161,8 @@ MonoBehaviour:
     - rid: 1536974532762927106
       type: {class: RelayNode, ns: ME.BECS.Extensions.GraphProcessor, asm: ME.BECS}
       data:
-        syncPoint: 0
+        syncPoint: 1
         syncCount: 0
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: 1656ec53-a88c-4c4d-a9d1-9c7e5dde0c57
         groupGUID: 
@@ -191,8 +185,6 @@ MonoBehaviour:
       data:
         syncPoint: 0
         syncCount: 2
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: 0acb11e2-895d-45c3-9313-3d458bbb5f14
         groupGUID: 
@@ -218,8 +210,6 @@ MonoBehaviour:
       data:
         syncPoint: 0
         syncCount: 2
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: 21298705-10b9-4936-9a88-7bbe57006d1e
         groupGUID: 
@@ -243,10 +233,8 @@ MonoBehaviour:
     - rid: 8346928923441103769
       type: {class: StartNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
-        syncPoint: 1
-        syncCount: 0
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
+        syncPoint: 0
+        syncCount: 3
         nodeCustomName: 
         GUID: StartNode
         groupGUID: 
@@ -266,10 +254,8 @@ MonoBehaviour:
     - rid: 8346928923441103770
       type: {class: ExitNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
-        syncPoint: 0
-        syncCount: -7
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
+        syncPoint: 1
+        syncCount: 0
         nodeCustomName: 
         GUID: EndNode
         groupGUID: 
@@ -291,8 +277,6 @@ MonoBehaviour:
       data:
         syncPoint: 0
         syncCount: 2
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: 0e9ec525-76ba-44e8-a90b-b7c6a0cbfe26
         groupGUID: 
@@ -313,17 +297,23 @@ MonoBehaviour:
     - rid: 8346928923441103772
       type: {class: CreateSystem, ns: ME.BECS.FogOfWar, asm: ME.BECS.FogOfWar}
       data:
+        mapPosition:
+          x:
+            rawValue: 0
+          y:
+            rawValue: 0
         mapSize:
-          x: 500
-          y: 500
-        resolution: 1
+          x:
+            rawValue: 1128792064
+          y:
+            rawValue: 1128792064
+        resolution:
+          rawValue: 1065353216
     - rid: 8346928923441103773
       type: {class: SystemNode, ns: ME.BECS.FeaturesGraph.Nodes, asm: ME.BECS.Features}
       data:
         syncPoint: 0
         syncCount: 3
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: f322d675-e5e1-4dfc-839e-1f71fac83c18
         groupGUID: 
@@ -349,8 +339,6 @@ MonoBehaviour:
       data:
         syncPoint: 0
         syncCount: 2
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: 37b28351-46ed-4aeb-b7d4-f48fd39cdc77
         groupGUID: 
@@ -377,8 +365,6 @@ MonoBehaviour:
       data:
         syncPoint: 0
         syncCount: 3
-        tempSyncCountInput: 0
-        tempSyncCountOutput: 0
         nodeCustomName: 
         GUID: 59f276f0-dc35-48e5-9058-945103675ed4
         groupGUID: 
@@ -402,4 +388,4 @@ MonoBehaviour:
         renderView:
           viewSource:
             providerId: 1
-            prefabId: 11
+            prefabId: 34

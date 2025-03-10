@@ -8,53 +8,53 @@ namespace ME.BECS {
 
     public readonly unsafe struct CommandBufferJobParallel {
 
-        public readonly CommandBuffer* buffer;
+        public readonly safe_ptr<CommandBuffer> buffer;
         public readonly uint index;
-        public uint Count => this.buffer->count;
+        public uint Count => this.buffer.ptr->count;
         public readonly uint entId;
         public readonly ushort entGen;
-        public Ent ent => new Ent(this.entId, this.entGen, this.buffer->worldId);
+        public Ent ent => new Ent(this.entId, this.entGen, this.buffer.ptr->worldId);
 
         [INLINE(256)]
-        public CommandBufferJobParallel(CommandBuffer* buffer, uint index) {
+        public CommandBufferJobParallel(safe_ptr<CommandBuffer> buffer, uint index) {
             this.buffer = buffer;
             this.index = index;
-            this.entId = this.buffer->entities[index];
-            this.entGen = this.buffer->state->entities.GetGeneration(this.buffer->state, this.entId);
+            this.entId = this.buffer.ptr->entities[index];
+            this.entGen = Ents.GetGeneration(this.buffer.ptr->state, this.entId);
         }
 
         [INLINE(256)]
         public ref readonly T Read<T>() where T : unmanaged, IComponent {
 
-            return ref this.buffer->Read<T>(this.entId, this.entGen);
+            return ref this.buffer.ptr->Read<T>(this.entId, this.entGen);
 
         }
 
         [INLINE(256)]
         public ref T Get<T>() where T : unmanaged, IComponent {
 
-            return ref this.buffer->Get<T>(this.entId, this.entGen);
+            return ref this.buffer.ptr->Get<T>(this.entId, this.entGen);
 
         }
 
         [INLINE(256)]
         public bool Set<T>(in T data) where T : unmanaged, IComponent {
 
-            return this.buffer->Set<T>(this.entId, this.entGen, in data);
+            return this.buffer.ptr->Set<T>(this.entId, this.entGen, in data);
 
         }
 
         [INLINE(256)]
         public bool Remove<T>() where T : unmanaged, IComponent {
 
-            return this.buffer->Remove<T>(this.entId, this.entGen);
+            return this.buffer.ptr->Remove<T>(this.entId, this.entGen);
 
         }
 
         [INLINE(256)]
         public bool Has<T>(bool checkEnabled = true) where T : unmanaged, IComponent {
 
-            return this.buffer->Has<T>(this.entId, this.entGen, checkEnabled);
+            return this.buffer.ptr->Has<T>(this.entId, this.entGen, checkEnabled);
 
         }
 
@@ -62,13 +62,13 @@ namespace ME.BECS {
 
     public readonly unsafe struct CommandBufferJobBatch {
 
-        private readonly CommandBuffer* buffer;
+        private readonly safe_ptr<CommandBuffer> buffer;
         public readonly uint fromIndex;
         public readonly uint toIndex;
-        public uint Count => this.buffer->count;
+        public uint Count => this.buffer.ptr->count;
 
         [INLINE(256)]
-        public CommandBufferJobBatch(CommandBuffer* buffer, uint fromIndex, uint toIndex) {
+        public CommandBufferJobBatch(safe_ptr<CommandBuffer> buffer, uint fromIndex, uint toIndex) {
             this.buffer = buffer;
             this.fromIndex = fromIndex;
             this.toIndex = toIndex;
@@ -77,40 +77,40 @@ namespace ME.BECS {
         [INLINE(256)]
         public ref readonly T Read<T>(uint index) where T : unmanaged, IComponent {
 
-            var entId = this.buffer->entities[index];
-            return ref this.buffer->Read<T>(entId, this.buffer->state->entities.GetGeneration(this.buffer->state, entId));
+            var entId = this.buffer.ptr->entities[index];
+            return ref this.buffer.ptr->Read<T>(entId, Ents.GetGeneration(this.buffer.ptr->state, entId));
 
         }
 
         [INLINE(256)]
         public ref T Get<T>(uint index) where T : unmanaged, IComponent {
 
-            var entId = this.buffer->entities[index];
-            return ref this.buffer->Get<T>(entId, this.buffer->state->entities.GetGeneration(this.buffer->state, entId));
+            var entId = this.buffer.ptr->entities[index];
+            return ref this.buffer.ptr->Get<T>(entId, Ents.GetGeneration(this.buffer.ptr->state, entId));
 
         }
 
         [INLINE(256)]
         public bool Set<T>(uint index, in T data) where T : unmanaged, IComponent {
             
-            var entId = this.buffer->entities[index];
-            return this.buffer->Set<T>(entId, this.buffer->state->entities.GetGeneration(this.buffer->state, entId), in data);
+            var entId = this.buffer.ptr->entities[index];
+            return this.buffer.ptr->Set<T>(entId, Ents.GetGeneration(this.buffer.ptr->state, entId), in data);
 
         }
 
         [INLINE(256)]
         public bool Remove<T>(uint index) where T : unmanaged, IComponent {
             
-            var entId = this.buffer->entities[index];
-            return this.buffer->Remove<T>(entId, this.buffer->state->entities.GetGeneration(this.buffer->state, entId));
+            var entId = this.buffer.ptr->entities[index];
+            return this.buffer.ptr->Remove<T>(entId, Ents.GetGeneration(this.buffer.ptr->state, entId));
 
         }
 
         [INLINE(256)]
         public bool Has<T>(uint index, bool checkEnabled = true) where T : unmanaged, IComponent {
             
-            var entId = this.buffer->entities[index];
-            return this.buffer->Has<T>(entId, this.buffer->state->entities.GetGeneration(this.buffer->state, entId), checkEnabled);
+            var entId = this.buffer.ptr->entities[index];
+            return this.buffer.ptr->Has<T>(entId, Ents.GetGeneration(this.buffer.ptr->state, entId), checkEnabled);
 
         }
 
@@ -120,12 +120,12 @@ namespace ME.BECS {
 
         private readonly uint entId;
         private readonly ushort entGen;
-        public readonly CommandBuffer* buffer;
-        public uint Count => this.buffer->count;
-        public Ent ent => new Ent(this.entId, this.entGen, this.buffer->worldId);
+        public readonly safe_ptr<CommandBuffer> buffer;
+        public uint Count => this.buffer.ptr->count;
+        public Ent ent => new Ent(this.entId, this.entGen, this.buffer.ptr->worldId);
         
         [INLINE(256)]
-        public CommandBufferJob(in uint entId, ushort gen, CommandBuffer* buffer) {
+        public CommandBufferJob(in uint entId, ushort gen, safe_ptr<CommandBuffer> buffer) {
             this.entId = entId;
             this.entGen = gen;
             this.buffer = buffer;
@@ -134,35 +134,35 @@ namespace ME.BECS {
         [INLINE(256)]
         public ref readonly T Read<T>() where T : unmanaged, IComponent {
 
-            return ref this.buffer->Read<T>(this.entId, this.entGen);
+            return ref this.buffer.ptr->Read<T>(this.entId, this.entGen);
 
         }
 
         [INLINE(256)]
         public ref T Get<T>() where T : unmanaged, IComponent {
 
-            return ref this.buffer->Get<T>(this.entId, this.entGen);
+            return ref this.buffer.ptr->Get<T>(this.entId, this.entGen);
 
         }
 
         [INLINE(256)]
         public bool Set<T>(in T data) where T : unmanaged, IComponent {
 
-            return this.buffer->Set<T>(this.entId, this.entGen, in data);
+            return this.buffer.ptr->Set<T>(this.entId, this.entGen, in data);
 
         }
 
         [INLINE(256)]
         public bool Remove<T>() where T : unmanaged, IComponent {
 
-            return this.buffer->Remove<T>(this.entId, this.entGen);
+            return this.buffer.ptr->Remove<T>(this.entId, this.entGen);
 
         }
 
         [INLINE(256)]
         public bool Has<T>(bool checkEnabled = true) where T : unmanaged, IComponent {
 
-            return this.buffer->Has<T>(this.entId, this.entGen, checkEnabled);
+            return this.buffer.ptr->Has<T>(this.entId, this.entGen, checkEnabled);
 
         }
 
@@ -178,8 +178,7 @@ namespace ME.BECS {
         public uint* entities;
         public uint count;
         
-        [NativeDisableUnsafePtrRestriction]
-        public State* state;
+        public safe_ptr<State> state;
         public ushort worldId;
 
         public bool sync;
@@ -197,7 +196,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public void Dispose() {
 
-            if (this.entities != null) _freeArray(this.entities, this.count);
+            //if (this.entities != null) _freeArray(this.entities, this.count, Constants.ALLOCATOR_TEMP_ST.ToAllocator);
             this = default;
             
         }
@@ -205,7 +204,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public ref readonly T Read<T>(uint id, ushort gen) where T : unmanaged, IComponent {
 
-            return ref this.state->components.Read<T>(this.state, id, gen);
+            return ref Components.Read<T>(this.state, id, gen);
 
         }
 
@@ -217,7 +216,7 @@ namespace ME.BECS {
             }
             E.IS_IN_TICK(this.state);
             var ent = new Ent(id, gen, this.worldId);
-            return ref this.state->components.Get<T>(this.state, ent);
+            return ref Components.Get<T>(this.state, ent);
 
         }
 
@@ -230,7 +229,7 @@ namespace ME.BECS {
             }
             E.IS_IN_TICK(this.state);
             var ent = new Ent(id, gen, this.worldId);
-            return this.state->components.SetUnknownType(this.state, StaticTypes<T>.typeId, StaticTypes<T>.groupId, in ent, in data);
+            return Components.SetUnknownType(this.state, StaticTypes<T>.typeId, StaticTypes<T>.groupId, in ent, in data);
 
         }
 
@@ -243,7 +242,7 @@ namespace ME.BECS {
             } else {
                 E.IS_IN_TICK(this.state);
                 var ent = new Ent(id, gen, this.worldId);
-                return this.state->components.RemoveUnknownType(this.state, StaticTypes<T>.typeId, StaticTypes<T>.groupId, in ent);
+                return Components.RemoveUnknownType(this.state, StaticTypes<T>.typeId, StaticTypes<T>.groupId, in ent);
             }
 
         }
@@ -251,7 +250,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public bool Has<T>(uint id, ushort gen, bool checkEnabled) where T : unmanaged, IComponent {
 
-            return this.state->components.Has<T>(this.state, id, gen, checkEnabled);
+            return Components.Has<T>(this.state, id, gen, checkEnabled);
 
         }
 

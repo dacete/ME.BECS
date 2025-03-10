@@ -3,6 +3,26 @@ namespace ME.BECS {
     [System.Serializable]
     public struct StateProperties {
 
+        public static StateProperties Default => new StateProperties() {
+            entitiesCapacity = 100u,
+            archetypesCapacity = 100u,
+            storageCapacity = 1u,
+            queriesCapacity = 100u,
+            sharedComponentsCapacity = 10u,
+            oneShotTasksCapacity = 1u,
+            mode = WorldMode.Logic,
+        };
+
+        public static StateProperties Min => new StateProperties() {
+            entitiesCapacity = 1u,
+            storageCapacity = 1u,
+            archetypesCapacity = 1u,
+            queriesCapacity = 1u,
+            oneShotTasksCapacity = 1u,
+            sharedComponentsCapacity = 1u,
+            mode = WorldMode.Logic,
+        };
+
         [UnityEngine.MinAttribute(1)]
         [UnityEngine.Tooltip("Resize internal storage and fill pools with entities by default. Set up this value to fit max entities count of your world.")]
         public uint entitiesCapacity;
@@ -18,6 +38,8 @@ namespace ME.BECS {
         [UnityEngine.MinAttribute(0)]
         [UnityEngine.Tooltip("Resize shared components storage. Set up this value to fit max shared components count.")]
         public uint sharedComponentsCapacity;
+        [UnityEngine.Tooltip("Resize one-shot tasks storage by this value.")]
+        public uint oneShotTasksCapacity;
         [UnityEngine.MinAttribute(0)]
         [UnityEngine.Tooltip("Use Logic for logic worlds, Visual for client-only local worlds.")]
         public WorldMode mode;
@@ -37,14 +59,7 @@ namespace ME.BECS {
     public struct WorldProperties {
         
         public static WorldProperties Default => new WorldProperties() {
-            stateProperties = new StateProperties() {
-                entitiesCapacity = 10000u,
-                archetypesCapacity = 100u,
-                storageCapacity = 1u,
-                queriesCapacity = 100u,
-                sharedComponentsCapacity = 10u,
-                mode = WorldMode.Logic,
-            },
+            stateProperties = StateProperties.Default,
             allocatorProperties = new AllocatorProperties() {
                 sizeInBytesCapacity = 1024 * 1024, // 1MB
             },

@@ -10,14 +10,34 @@ namespace ME.BECS.Editor.FeaturesGraph {
 
         public FeaturesGraphView(UnityEditor.EditorWindow window) : base(window) { }
 
+        public bool isEditable;
         private float timer;
         private System.Action<UnityEditor.Experimental.GraphView.NodeCreationContext> baseNodeCreationRequest;
+        
+        public void UpdateEnableState() {
+            
+            if (this.isEditable == false) {
+                this.AddToClassList("not-editable");
+                var elements = this.Query<VisualElement>().ToList();
+                foreach (var element in elements) {
+                    if (element.ClassListContains("open-button") == true ||
+                        (element is Toggle && element.parent is Foldout)) {
+                        
+                    } else {
+                        element.pickingMode = PickingMode.Ignore;
+                    }
+                }
 
+                this.contentContainer.pickingMode = PickingMode.Position;
+            }
+
+        }
+        
         protected override void InitializeView() {
             
             base.InitializeView();
 
-            SetupZoom(0.05f, 1f);
+            this.SetupZoom(0.05f, 1f);
             this.baseNodeCreationRequest = this.nodeCreationRequest;
             this.nodeCreationRequest = (evt) => {
                 if (evt.index == -2) {
@@ -51,6 +71,8 @@ namespace ME.BECS.Editor.FeaturesGraph {
                 }
             };
 
+            this.UpdateEnableState();
+
         }
 
         protected override void BuildGroupContextualMenu(UnityEngine.UIElements.ContextualMenuPopulateEvent evt, int menuPosition = -1) {
@@ -60,6 +82,13 @@ namespace ME.BECS.Editor.FeaturesGraph {
             Vector2 position = (evt.currentTarget as VisualElement).ChangeCoordinatesTo(this.contentViewContainer, evt.localMousePosition);
             evt.menu.InsertAction(menuPosition, "Create Feature", (e) => this.AddSelectionsToGroup(this.AddGroup(new Group("Feature", position))), DropdownMenuAction.AlwaysEnabled);
             
+        }
+
+        protected override bool canDeleteSelection {
+            get {
+                if (this.selection.Count == 0) return false;//Debug.Log(base.canDeleteSelection + " :: " + this.selection.Count);
+                return base.canDeleteSelection;
+            }
         }
 
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt) {

@@ -92,6 +92,11 @@ namespace ME.BECS.Editor {
         }
 
         public static VisualElement DrawTooltip(VisualElement container, string tooltip) {
+            return DrawTooltip(container, tooltip, default);
+        }
+        
+
+        public static VisualElement DrawTooltip(VisualElement container, string tooltip, StyleLength width) {
             
             if (string.IsNullOrEmpty(tooltip) == false) {
 
@@ -99,8 +104,13 @@ namespace ME.BECS.Editor {
                 var tooltipElement = new Label(tooltip);
                 tooltipElement.AddToClassList("tooltip-text");
                 tooltipElement.pickingMode = PickingMode.Ignore;
+                if (width != default) {
+                    tooltipElement.style.width = width;
+                    tooltipElement.AddToClassList("custom-width");
+                }
                 var tooltipButton = new Label("?");
                 tooltipButton.AddToClassList("tooltip");
+                tooltipButton.style.flexGrow = new StyleFloat(0f);
                 container.Add(tooltipElement);
                 container.Add(tooltipButton);
                 return tooltipElement;
@@ -109,6 +119,38 @@ namespace ME.BECS.Editor {
 
             return null;
 
+        }
+
+        public static VisualElement DrawTooltip(VisualElement container, System.Func<VisualElement> tooltip, StyleLength width) {
+            
+            if (tooltip != null) {
+
+                container.AddToClassList("has-tooltip");
+                var tooltipElement = new VisualElement();
+                tooltipElement.AddToClassList("tooltip-text");
+                tooltipElement.pickingMode = PickingMode.Ignore;
+                if (width != default) {
+                    tooltipElement.style.width = width;
+                    tooltipElement.AddToClassList("custom-width");
+                }
+                tooltipElement.Add(tooltip.Invoke());
+                var tooltipButton = new Label("?");
+                tooltipButton.AddToClassList("tooltip");
+                tooltipButton.style.flexGrow = new StyleFloat(0f);
+                container.Add(tooltipElement);
+                container.Add(tooltipButton);
+                return tooltipElement;
+
+            }
+
+            return null;
+
+        }
+
+        public static void RemoveTooltip(VisualElement container) {
+            container.RemoveFromClassList("has-tooltip");
+            container.Q(className: "tooltip-text").RemoveFromHierarchy();
+            container.Q(className: "tooltip").RemoveFromHierarchy();
         }
 
         public static void DrawPropertyField(VisualElement root, SerializedProperty property) {
@@ -198,6 +240,126 @@ namespace ME.BECS.Editor {
             
             DrawTooltip(container, property);
 
+        }
+
+        public static System.Collections.Generic.List<VisualElement> DrawAspects(VisualElement root, System.Collections.Generic.IEnumerable<EditorUtils.AspectItem> aspects, System.Action<VisualElement, Label, EditorUtils.AspectItem> onEdit = null) {
+
+            var result = new System.Collections.Generic.List<VisualElement>();
+            foreach (var aspect in aspects) {
+                
+                var label = aspect.value;
+                var fields = EditorUtils.GetAspectTypes(aspect.type);
+
+                var fieldContainer = new VisualElement();
+                fieldContainer.AddToClassList("field");
+                
+                var labelField = new Foldout();
+                fieldContainer.Add(labelField);
+                labelField.text = label;
+                labelField.AddToClassList("aspect-component-container-field");
+                
+                var foldoutLabel = labelField.Q<Toggle>();
+                var tooltip = (Label)EditorUIUtils.DrawTooltip(foldoutLabel, aspect.info.GetEditorComment());
+                foldoutLabel.RegisterCallback<ClickEvent>(x => {
+                    if (x.clickCount == 2) {
+                        onEdit?.Invoke(foldoutLabel, tooltip, aspect);
+                    }
+                });
+                
+                {
+                    var header = new VisualElement();
+                    header.AddToClassList("header");
+                    {
+                        var column = new VisualElement();
+                        column.AddToClassList("first-column");
+                        var headerLabel = new Label("Component Name");
+                        headerLabel.AddToClassList("main-label");
+                        column.Add(headerLabel);
+                        header.Add(column);
+                    }
+                    {
+                        var column = new VisualElement();
+                        column.AddToClassList("column");
+                        var headerLabel = new Label("Query");
+                        column.Add(headerLabel);
+                        header.Add(column);
+                    }
+                    {
+                        var column = new VisualElement();
+                        column.AddToClassList("column");
+                        var headerLabel = new Label("Auto");
+                        column.Add(headerLabel);
+                        header.Add(column);
+                    }
+                    labelField.Add(header);
+                }
+
+                for (var index = 0; index < fields.Length; ++index) {
+
+                    var field = fields[index];
+                    var labelFieldItem = new VisualElement();
+                    labelFieldItem.AddToClassList("aspect-component-container");
+                    if (index == fields.Length - 1) labelFieldItem.AddToClassList("last");
+                    var componentLabel = EditorUtils.GetComponentName(field.fieldType);
+                    {
+                        var column = new VisualElement();
+                        column.AddToClassList("first-column");
+                        var mainLabel = new Label(componentLabel);
+                        mainLabel.AddToClassList("main-label");
+                        column.Add(mainLabel);
+                        labelFieldItem.Add(column);
+                    }
+
+                    {
+                        var column = new VisualElement();
+                        column.AddToClassList("column");
+                        var text = $"When you use <b>{label}</b> aspect in query, <b>{componentLabel}</b> will be <b>skipped</b>.";
+                        if (field.required == true) {
+                            text = $"When you use <b>{label}</b> aspect in query, <b>{componentLabel}</b> will be <b>used</b> for this operation.";
+                        }
+
+                        EditorUIUtils.DrawTooltip(column, text, new StyleLength(new Length(200f, LengthUnit.Pixel)));
+                        var toggle = new Toggle();
+                        toggle.SetEnabled(false);
+                        toggle.value = field.required;
+                        column.Add(toggle);
+                        labelFieldItem.Add(column);
+                    }
+
+                    {
+                        var column = new VisualElement();
+                        column.AddToClassList("column");
+                        var text = $"Some of aspect methods may create <b>{componentLabel}</b> at runtime.";
+                        if (field.config == true) {
+                            text = $"<b>{componentLabel}</b> automatically added onto entity while applying <b>{label}</b> aspect.";
+                        }
+
+                        EditorUIUtils.DrawTooltip(column, text, new StyleLength(new Length(200f, LengthUnit.Pixel)));
+                        var toggle = new Toggle();
+                        toggle.SetEnabled(false);
+                        toggle.value = field.config;
+                        column.Add(toggle);
+                        labelFieldItem.Add(column);
+                    }
+
+                    labelField.Add(labelFieldItem);
+
+                }
+
+                root.Add(fieldContainer);
+                result.Add(fieldContainer);
+
+            }
+
+            return result;
+
+        }
+
+        public static bool IsDarkColor(UnityEngine.Color backColor) {
+            UnityEngine.Color color = backColor;
+            color = UnityEngine.Color.Lerp(new UnityEngine.Color32(16, 16, 16, 255), color, color.a);
+            double l = 0.2126d * color.r + 0.7152d * color.g + 0.0722d * color.b;
+            return l > 0.4d;
         }
 
     }

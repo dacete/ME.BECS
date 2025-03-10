@@ -1,3 +1,10 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
 
 namespace ME.BECS.FogOfWar {
     
@@ -5,10 +12,8 @@ namespace ME.BECS.FogOfWar {
     using Unity.Collections.LowLevel.Unsafe;
     using Transforms;
     using Views;
-    using Unity.Mathematics;
     using static Cuts;
 
-    [RequiredDependencies(typeof(CreateSystem))]
     public struct CreateTextureSystem : IAwake, IDestroy {
 
         public View renderView;
@@ -19,8 +24,11 @@ namespace ME.BECS.FogOfWar {
 
         [WithoutBurst]
         public void OnAwake(ref SystemContext context) {
+
+            var logicWorld = context.world.parent;
+            E.IS_CREATED(logicWorld);
             
-            var system = context.world.GetSystem<CreateSystem>();
+            var system = logicWorld.GetSystem<CreateSystem>();
             {
                 var fowSize = math.max(32u, (uint2)(system.mapSize * system.resolution));
                 var tex = new UnityEngine.Texture2D((int)fowSize.x, (int)fowSize.y, UnityEngine.TextureFormat.RGBA32, false);
@@ -30,7 +38,7 @@ namespace ME.BECS.FogOfWar {
                 this.texture = new ClassPtr<UnityEngine.Texture2D>(tex);
             }
 
-            var render = Ent.New();
+            var render = Ent.New(in context, editorName: "FOW Renderer");
             var tr = render.GetOrCreateAspect<TransformAspect>();
             var pos = tr.position;
             pos.x = 0f;

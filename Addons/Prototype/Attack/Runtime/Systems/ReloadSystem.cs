@@ -1,3 +1,10 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
 
 namespace ME.BECS.Attack {
     
@@ -9,14 +16,14 @@ namespace ME.BECS.Attack {
     public struct ReloadSystem : IUpdate {
 
         [BURST(CompileSynchronously = true)]
-        public struct ReloadJob : IJobParallelForAspect<AttackAspect> {
+        public struct ReloadJob : IJobForAspects<AttackAspect> {
 
-            public float dt;
+            public tfloat dt;
             
-            public void Execute(in JobInfo jobInfo, ref AttackAspect aspect) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref AttackAspect aspect) {
 
-                aspect.component.reloadTimer += this.dt;
-                if (aspect.component.reloadTimer >= aspect.component.reloadTime) {
+                aspect.componentRuntimeReload.reloadTimer += this.dt;
+                if (aspect.readComponentRuntimeReload.reloadTimer >= aspect.component.reloadTime) {
 
                     aspect.IsReloaded = true;
 
@@ -28,7 +35,7 @@ namespace ME.BECS.Attack {
 
         public void OnUpdate(ref SystemContext context) {
 
-            var dependsOn = context.Query().Without<ReloadedComponent>().Schedule<ReloadJob, AttackAspect>(new ReloadJob() {
+            var dependsOn = context.Query().AsParallel().Without<ReloadedComponent>().Schedule<ReloadJob, AttackAspect>(new ReloadJob() {
                 dt = context.deltaTime,
             });
             context.SetDependency(dependsOn);

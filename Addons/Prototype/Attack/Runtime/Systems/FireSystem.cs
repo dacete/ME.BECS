@@ -1,3 +1,8 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+#else
+using tfloat = System.Single;
+#endif
 
 namespace ME.BECS.Attack {
     
@@ -5,38 +10,74 @@ namespace ME.BECS.Attack {
     using ME.BECS.Transforms;
     using ME.BECS.Jobs;
     using ME.BECS.Bullets;
-    using Unity.Mathematics;
 
     [BURST(CompileSynchronously = true)]
     [UnityEngine.Tooltip("Fire system")]
     public struct FireSystem : IUpdate {
 
         [BURST(CompileSynchronously = true)]
-        public struct FireJob : IJobAspect<AttackAspect, TransformAspect, QuadTreeQueryAspect> {
+        public struct FireTargetJob : IJobForAspects<AttackAspect, TransformAspect, QuadTreeQueryAspect> {
 
-            public void Execute(in JobInfo jobInfo, ref AttackAspect aspect, ref TransformAspect tr, ref QuadTreeQueryAspect query) {
+            public tfloat dt;
+            
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref AttackAspect aspect, ref TransformAspect tr, ref QuadTreeQueryAspect query) {
 
                 if (aspect.target.IsAlive() == true) {
 
-                    var firePoint = ME.BECS.Bullets.BulletUtils.GetFirePoint(aspect.ent);
-                    var pos = tr.GetWorldMatrixPosition();
-                    var rot = tr.GetWorldMatrixRotation();
-                    if (firePoint.IsAlive() == true) {
-                        var firePointTr = firePoint.GetAspect<TransformAspect>();
-                        pos = firePointTr.GetWorldMatrixPosition();
-                        rot = firePointTr.GetWorldMatrixRotation();
+                    if (aspect.RateFire(this.dt) == true) {
+
+                        var firePoint = ME.BECS.Bullets.BulletUtils.GetNextFirePoint(aspect.ent);
+                        var pos = tr.GetWorldMatrixPosition();
+                        var rot = tr.GetWorldMatrixRotation();
+                        if (firePoint.IsAlive() == true) {
+                            var firePointTr = firePoint.GetAspect<TransformAspect>();
+                            pos = firePointTr.GetWorldMatrixPosition();
+                            rot = firePointTr.GetWorldMatrixRotation();
+                        }
+
+                        BulletUtils.CreateBullet(aspect.ent.GetParent(), pos, rot, query.readQuery.treeMask, aspect.target, default, aspect.readComponent.bulletConfig,
+                                                 aspect.readComponent.muzzleView, jobInfo: jobInfo);
+
+                        aspect.UseFire();
+
                     }
-
-                    BulletUtils.CreateBullet(aspect.ent, pos, rot, query.query.treeMask, aspect.target, default, aspect.component.bulletConfig, aspect.component.bulletView,
-                                             aspect.component.muzzleView, jobInfo: jobInfo);
-
-                    // fire - reset target and reload
-                    aspect.IsReloaded = false;
 
                 }
 
-                // we remove target to initiate the new search (may be another target will be better)
-                aspect.SetTarget(default);
+            }
+
+        }
+
+        [BURST(CompileSynchronously = true)]
+        public struct FireTargetsJob : IJobForAspects<AttackAspect, TransformAspect, QuadTreeQueryAspect> {
+
+            public tfloat dt;
+            
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref AttackAspect aspect, ref TransformAspect tr, ref QuadTreeQueryAspect query) {
+
+                if (aspect.targets.IsCreated == true) {
+
+                    if (aspect.RateFire(this.dt) == true) {
+
+                        var firePoint = ME.BECS.Bullets.BulletUtils.GetNextFirePoint(aspect.ent);
+                        var pos = tr.GetWorldMatrixPosition();
+                        var rot = tr.GetWorldMatrixRotation();
+                        if (firePoint.IsAlive() == true) {
+                            var firePointTr = firePoint.GetAspect<TransformAspect>();
+                            pos = firePointTr.GetWorldMatrixPosition();
+                            rot = firePointTr.GetWorldMatrixRotation();
+                        }
+
+                        foreach (var unit in aspect.targets) {
+                            BulletUtils.CreateBullet(aspect.ent.GetParent(), pos, rot, query.readQuery.treeMask, unit, default, aspect.readComponent.bulletConfig,
+                                                     aspect.readComponent.muzzleView, jobInfo: in jobInfo);
+                        }
+
+                        aspect.UseFire();
+
+                    }
+
+                }
 
             }
 
@@ -44,11 +85,23 @@ namespace ME.BECS.Attack {
 
         public void OnUpdate(ref SystemContext context) {
 
-            var dependsOn = context.Query()
-                               .With<ReloadedComponent>()
-                               .With<AttackTargetComponent>()
-                               .Schedule<FireJob, AttackAspect, TransformAspect, QuadTreeQueryAspect>();
-            context.SetDependency(dependsOn);
+            var target = context.Query()
+                                .With<ReloadedComponent>()
+                                .With<CanFireComponent>()
+                                .Without<FireUsedComponent>()
+                                .With<AttackTargetComponent>()
+                                .Schedule<FireTargetJob, AttackAspect, TransformAspect, QuadTreeQueryAspect>(new FireTargetJob() {
+                                    dt = context.deltaTime,
+                                });
+            var targets = context.Query()
+                                .With<ReloadedComponent>()
+                                .With<CanFireComponent>()
+                                .Without<FireUsedComponent>()
+                                .With<AttackTargetsComponent>()
+                                .Schedule<FireTargetsJob, AttackAspect, TransformAspect, QuadTreeQueryAspect>(new FireTargetsJob() {
+                                    dt = context.deltaTime,
+                                });
+            context.SetDependency(Unity.Jobs.JobHandle.CombineDependencies(target, targets));
 
         }
 

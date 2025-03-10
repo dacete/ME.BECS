@@ -10,18 +10,18 @@ namespace ME.BECS {
         private const int BITS_IN_ULONG = sizeof(ulong) * 8;
 
         [NativeDisableUnsafePtrRestriction]
-        public readonly ulong* ptr;
+        public readonly safe_ptr<ulong> ptr;
         public uint Length;
         internal readonly Unity.Collections.Allocator allocator;
 
-        public bool isCreated => this.ptr != null;
+        public bool IsCreated => this.ptr.ptr != null;
 
         [INLINE(256)]
         public TempBitArray(uint length, ClearOptions clearOptions = ClearOptions.ClearMemory, Unity.Collections.Allocator allocator = Constants.ALLOCATOR_TEMPJOB) {
 
             var sizeInBytes = Bitwise.AlignULongBits(length);
             this.allocator = allocator;
-            this.ptr = (ulong*)_make(sizeInBytes, TAlign<ulong>.alignInt, this.allocator);
+            this.ptr = _make(sizeInBytes, TAlign<ulong>.alignInt, this.allocator);
             this.Length = length;
 
             if (clearOptions == ClearOptions.ClearMemory) {
@@ -34,7 +34,7 @@ namespace ME.BECS {
 
             var sizeInBytes = Bitwise.AlignULongBits(length);
             this.allocator = allocator.ToAllocator;
-            this.ptr = (ulong*)Unity.Collections.AllocatorManager.Allocate(this.allocator, (int)sizeInBytes, TAlign<ulong>.alignInt);
+            this.ptr = _make((int)sizeInBytes, TAlign<ulong>.alignInt, this.allocator);
             this.Length = length;
 
             if (clearOptions == ClearOptions.ClearMemory) {
@@ -46,7 +46,7 @@ namespace ME.BECS {
         public TempBitArray(in MemoryAllocator allocator, in BitArray bitmap, Unity.Collections.Allocator unityAllocator) {
 
             var newArr = new TempBitArray(bitmap.Length, ClearOptions.UninitializedMemory, unityAllocator);
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, bitmap.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(bitmap.ptr);
             _memcpy(ptr, newArr.ptr, Bitwise.AlignULongBits(bitmap.Length));
             this = newArr;
             
@@ -56,7 +56,7 @@ namespace ME.BECS {
         public TempBitArray(in MemoryAllocator allocator, in BitArray bitmap, Unity.Collections.AllocatorManager.AllocatorHandle unityAllocator) {
 
             var newArr = new TempBitArray(bitmap.Length, ClearOptions.UninitializedMemory, unityAllocator);
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, bitmap.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(bitmap.ptr);
             _memcpy(ptr, newArr.ptr, Bitwise.AlignULongBits(bitmap.Length));
             this = newArr;
             
@@ -143,7 +143,7 @@ namespace ME.BECS {
             if (bitmap.Length == 0) return;
             this.Resize(bitmap.Length > this.Length ? bitmap.Length : this.Length, this.allocator);
             E.RANGE(bitmap.Length - 1u, 0u, this.Length);
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, bitmap.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(bitmap.ptr);
             var len = Bitwise.GetMinLength(bitmap.Length, this.Length);
             for (var index = 0; index < len; ++index) {
                 this.ptr[index] |= ptr[index];
@@ -182,7 +182,7 @@ namespace ME.BECS {
                 return;
             }
             E.RANGE(bitmap.Length - 1u, 0u, this.Length);
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, bitmap.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(bitmap.ptr);
             var len = Bitwise.GetLength(this.Length);
             var bLen = Bitwise.GetLength(bitmap.Length);
             for (var index = 0; index < len; ++index) {
@@ -209,7 +209,7 @@ namespace ME.BECS {
             E.IS_CREATED(this);
             if (bitmap.Length == 0) return;
             E.RANGE(bitmap.Length - 1u, 0u, this.Length);
-            var ptr = (ulong*)MemoryAllocatorExt.GetUnsafePtr(in allocator, bitmap.ptr);
+            var ptr = (safe_ptr<ulong>)allocator.GetUnsafePtr(bitmap.ptr);
             var len = Bitwise.GetMinLength(bitmap.Length, this.Length);
             for (var index = 0; index < len; ++index) {
                 this.ptr[index] &= ~ptr[index];
@@ -278,12 +278,7 @@ namespace ME.BECS {
         public void Dispose() {
 
             E.IS_CREATED(this);
-            if (((Unity.Collections.AllocatorManager.AllocatorHandle)this.allocator).IsCustomAllocator == true) {
-                Unity.Collections.AllocatorManager.Free(this.allocator, this.ptr);
-            } else {
-                _free(this.ptr, this.allocator);
-            }
-
+            _free(this.ptr, this.allocator);
             this = default;
 
         }
@@ -291,18 +286,42 @@ namespace ME.BECS {
         [INLINE(256)]
         public readonly void DisposeReadonly() {
 
-            if (((Unity.Collections.AllocatorManager.AllocatorHandle)this.allocator).IsCustomAllocator == true) {
-                Unity.Collections.AllocatorManager.Free(this.allocator, this.ptr);
-            } else {
-                _free(this.ptr, this.allocator);
-            }
-
+            _free(this.ptr, this.allocator);
+            
         }
 
         [INLINE(256)]
         public UnsafeList<uint> GetTrueBitsTemp() {
 
             var trueBits = new UnsafeList<uint>((int)this.Length, Constants.ALLOCATOR_TEMP);
+            for (var i = 0; i < this.Length; ++i) {
+                var val = this.ptr[i / TempBitArray.BITS_IN_ULONG];
+                if ((val & (0x1ul << (i % TempBitArray.BITS_IN_ULONG))) > 0) {
+                    trueBits.Add((uint)i);
+                }
+            }
+            
+            return trueBits;
+        }
+
+        [INLINE(256)]
+        public UnsafeList<uint> GetTrueBitsTemp(ushort worldId) {
+
+            var trueBits = new UnsafeList<uint>((int)this.Length, WorldsTempAllocator.allocatorTemp.Get(worldId).Allocator.ToAllocator);
+            for (var i = 0; i < this.Length; ++i) {
+                var val = this.ptr[i / TempBitArray.BITS_IN_ULONG];
+                if ((val & (0x1ul << (i % TempBitArray.BITS_IN_ULONG))) > 0) {
+                    trueBits.Add((uint)i);
+                }
+            }
+            
+            return trueBits;
+        }
+
+        [INLINE(256)]
+        public UnsafeList<uint> GetTrueBitsTemp(Unity.Collections.Allocator allocator) {
+
+            var trueBits = new UnsafeList<uint>((int)this.Length, allocator);
             for (var i = 0; i < this.Length; ++i) {
                 var val = this.ptr[i / TempBitArray.BITS_IN_ULONG];
                 if ((val & (0x1ul << (i % TempBitArray.BITS_IN_ULONG))) > 0) {

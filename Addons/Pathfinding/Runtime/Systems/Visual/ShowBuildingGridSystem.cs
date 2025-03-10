@@ -1,13 +1,19 @@
-using ME.BECS.Transforms;
-using ME.BECS.Views;
-using Unity.Collections.LowLevel.Unsafe;
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
 
 namespace ME.BECS.Pathfinding {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using BURST = Unity.Burst.BurstCompileAttribute;
+    using ME.BECS.Transforms;
+    using ME.BECS.Views;
+    using Unity.Collections.LowLevel.Unsafe;
     using Unity.Jobs;
-    using Unity.Mathematics;
     using ME.BECS.Jobs;
     using static Cuts;
 
@@ -17,12 +23,9 @@ namespace ME.BECS.Pathfinding {
         public uint2 gridSize;
         private Ent currentBuildingGrid;
         private ClassPtr<UnityEngine.Texture2D> texture;
-        private VisualWorld visualWorld;
         private Ent placeholder;
 
-        [INLINE(256)]
-        public VisualWorld GetVisualWorld() => this.visualWorld;
-
+        /*
         [INLINE(256)]
         public void SetVisualWorld(in VisualWorld visualWorld) {
             this.visualWorld = visualWorld;
@@ -36,6 +39,7 @@ namespace ME.BECS.Pathfinding {
             this.currentBuildingGrid.Set<TransformAspect>();
             this.currentBuildingGrid.InstantiateView(this.gridView);
         }
+        */
 
         [INLINE(256)]
         public void SetPlaceholder(in Ent placeholder) {
@@ -50,7 +54,7 @@ namespace ME.BECS.Pathfinding {
             public Unity.Collections.NativeArray<UnityEngine.Color32> buffer;
             
             public void Execute() {
-                _memclear(this.buffer.GetUnsafePtr(), (uint)this.buffer.Length * TSize<UnityEngine.Color32>.size);
+                _memclear((safe_ptr)this.buffer.GetUnsafePtr(), (uint)this.buffer.Length * TSize<UnityEngine.Color32>.size);
             }
 
         }

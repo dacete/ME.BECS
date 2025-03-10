@@ -1,8 +1,15 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+#endif
+
 namespace ME.BECS.Pathfinding {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using BURST = Unity.Burst.BurstCompileAttribute;
-    using Unity.Mathematics;
     using Unity.Jobs;
     using ME.BECS.Jobs;
     using static Cuts;
@@ -98,7 +105,7 @@ namespace ME.BECS.Pathfinding {
             
             for (uint idx = 0u; idx < root.chunks.Length; ++idx) {
                 ref var chunk = ref this.chunks[this.world.state, idx];
-                if (this.changedChunks.IsCreated == true && this.changedChunks[(int)idx] != this.world.state->tick) continue;
+                if (this.changedChunks.IsCreated == true && this.changedChunks[(int)idx] != this.world.state.ptr->tick) continue;
                 Graph.BuildPortals(in this.graph, idx, ref chunk, in this.world);
             }
 
@@ -120,7 +127,7 @@ namespace ME.BECS.Pathfinding {
         public void Execute(int index) {
 
             var chunkIndex = (uint)index;
-            if (this.changedChunks.IsCreated == false || this.changedChunks[index] == this.world.state->tick) {
+            if (this.changedChunks.IsCreated == false || this.changedChunks[index] == this.world.state.ptr->tick) {
                 // calculate portals connections
                 var root = this.graph.Read<RootGraphComponent>();
                 var chunk = this.chunks[this.world.state, chunkIndex];
@@ -227,7 +234,7 @@ namespace ME.BECS.Pathfinding {
     public unsafe struct PathDirectionsJob : IJob {
 
         [Unity.Collections.ReadOnlyAttribute]
-        public Unity.Collections.NativeReference<bool> needToRepath;
+        public Unity.Collections.NativeReference<byte> needToRepath;
         [Unity.Collections.ReadOnlyAttribute]
         public Unity.Collections.NativeList<uint> chunks;
         public Path path;
@@ -237,7 +244,7 @@ namespace ME.BECS.Pathfinding {
         
         public void Execute() {
 
-            if (this.needToRepath.Value == false) return;
+            if (this.needToRepath.Value == 0) return;
 
             var marker = new Unity.Profiling.ProfilerMarker("Calculate Path Directions");
             marker.Begin();
@@ -264,7 +271,7 @@ namespace ME.BECS.Pathfinding {
                     if (targetChunkIndex == curTempNode.chunkIndex &&
                         targetNodeIndex == curTempNode.nodeIndex) {
                         
-                    } else if (item.hasLineOfSight == false) {
+                    } else if (item.hasLineOfSight == 0) {
                         for (uint j = 0; j < 8u; ++j) {
 
                             var neighbourTempNode = Graph.GetNeighbourIndex(in this.world, curTempNode, j, root.chunkWidth, root.chunkHeight, this.path.chunks, root.width, root.height);
@@ -304,7 +311,7 @@ namespace ME.BECS.Pathfinding {
     public unsafe struct PathJob : IJob {
 
         [Unity.Collections.ReadOnlyAttribute]
-        public Unity.Collections.NativeReference<bool> needToRepath;
+        public Unity.Collections.NativeReference<byte> needToRepath;
         public World world;
         public Ent graph;
         public Filter filter;
@@ -312,14 +319,14 @@ namespace ME.BECS.Pathfinding {
 
         public void Execute() {
 
-            if (this.needToRepath.Value == false) return;
+            if (this.needToRepath.Value == 0) return;
 
             var root = this.graph.Read<RootGraphComponent>();
             
             var to = this.path.to;
             var highLevelPath = new Unity.Profiling.ProfilerMarker("HierarchyPath");
             highLevelPath.Begin();
-            var list = this.path.from.As(in this.world.state->allocator);
+            var list = this.path.from.As(in this.world.state.ptr->allocator);
             var nodesCount = 0;
             var hierarchyPathList = new Unity.Collections.LowLevel.Unsafe.UnsafeList<PathInfo>((int)list.Count, Unity.Collections.Allocator.Temp);
             for (uint i = 0; i < list.Count; ++i) {
@@ -351,17 +358,17 @@ namespace ME.BECS.Pathfinding {
                         chunksVisited.Set((int)portalInfo.chunkIndex, true);
 
                         var data = this.path.chunks[this.world.state, portalInfo.chunkIndex];
-                        if (data.flowField.isCreated == false) {
+                        if (data.flowField.IsCreated == false) {
 
                             ref var chunk = ref root.chunks[this.world.state, portalInfo.chunkIndex];
                             /*if (k < nodes.Length - 1) {
                                 var nextPortal = nodes[k + 1];
                                 if (nextPortal.chunkIndex == portalInfo.chunkIndex) {
-                                    if (chunk.cache.TryGetCache(in this.world.state->allocator, portalInfo, nextPortal, out var cacheChunk) == true) {
+                                    if (chunk.cache.TryGetCache(in this.world.state.ptr->allocator, portalInfo, nextPortal, out var cacheChunk) == true) {
                                         //UnityEngine.Debug.Log("USE CACHE: " + portalInfo.chunkIndex);
                                         // use cache
                                         data.index = portalInfo.chunkIndex;
-                                        data.flowField.CopyFrom(ref this.world.state->allocator, in cacheChunk.flowField);
+                                        data.flowField.CopyFrom(ref this.world.state.ptr->allocator, in cacheChunk.flowField);
                                         this.path.chunks[this.world.state, portalInfo.chunkIndex] = data;
                                         continue;
                                     }
@@ -371,7 +378,7 @@ namespace ME.BECS.Pathfinding {
                             var createMarker = new Unity.Profiling.ProfilerMarker("Create");
                             createMarker.Begin();
                             data.index = portalInfo.chunkIndex;
-                            data.flowField = new MemArray<Path.Chunk.Item>(ref this.world.state->allocator, chunk.nodes.Length);
+                            data.flowField = new MemArray<Path.Chunk.Item>(ref this.world.state.ptr->allocator, chunk.nodes.Length);
                             chunksToUpdate.Add(portalInfo);
                             createMarker.End();
                             var setDefaultMarker = new Unity.Profiling.ProfilerMarker("Set Default");
@@ -404,7 +411,7 @@ namespace ME.BECS.Pathfinding {
                             var targetChunk = root.chunks[this.world.state, targetChunkIndex];
                             targetNodeIndex = Graph.GetNodeIndex(in root, in targetChunk, to, true);
                             targetNodePosition = Graph.GetPosition(in root, in targetChunk, targetNodeIndex);
-                            this.path.chunks[this.world.state, targetChunkIndex].flowField[this.world.state, targetNodeIndex].hasLineOfSight = true;
+                            this.path.chunks[this.world.state, targetChunkIndex].flowField[this.world.state, targetNodeIndex].hasLineOfSight = 1;
                         }
 
                         for (int i = 0; i < chunksToUpdate.Length; ++i) {
@@ -515,8 +522,8 @@ namespace ME.BECS.Pathfinding {
                                         }
                                     }
 
-                                    if (this.CalculateLOS(in root, ref item, in curTempNode, new Graph.TempNode() { chunkIndex = targetChunkIndex, nodeIndex = targetNodeIndex, }) == true) {
-                                        item.hasLOS = true;
+                                    if (this.CalculateLOS(in root, ref item, in curTempNode, new Graph.TempNode() { chunkIndex = targetChunkIndex, nodeIndex = targetNodeIndex, }) == 1) {
+                                        item.hasLineOfSight = 1;
                                     }
                                     
                                     for (uint j = 0; j < 4u; ++j) {
@@ -549,14 +556,14 @@ namespace ME.BECS.Pathfinding {
                                 for (int p = 0; p < nodes.Length; ++p) {
                                     var srcPortalInfo = nodes[p];
                                     var pathChunk = this.path.chunks[this.world.state, srcPortalInfo.chunkIndex];
-                                    if (pathChunk.hasLOS == true) continue;
+                                    if (pathChunk.hasLineOfSight == 1) continue;
                                     ref var chunkData = ref root.chunks[this.world.state, srcPortalInfo.chunkIndex];
                                     if (p < nodes.Length - 1) {
                                         var nextPortalInfo = nodes[p + 1];
                                         if (srcPortalInfo.chunkIndex == nextPortalInfo.chunkIndex) {
                                             // need to add local portals only
                                             //UnityEngine.Debug.Log("UPDATE CACHE: " + srcPortalInfo.chunkIndex);
-                                            chunkData.cache.UpdateCache(ref this.world.state->allocator, srcPortalInfo, nextPortalInfo,
+                                            chunkData.cache.UpdateCache(ref this.world.state.ptr->allocator, srcPortalInfo, nextPortalInfo,
                                                                         in this.path.chunks[this.world.state, srcPortalInfo.chunkIndex]);
                                         }
                                     }
@@ -580,12 +587,12 @@ namespace ME.BECS.Pathfinding {
         }
         
         [INLINE(256)]
-        private bool CalculateLOS(in RootGraphComponent root, ref Path.Chunk chunk, in Graph.TempNode node, in Graph.TempNode targetNode) {
+        private byte CalculateLOS(in RootGraphComponent root, ref Path.Chunk chunk, in Graph.TempNode node, in Graph.TempNode targetNode) {
 
             [INLINE(256)]
-            static bool GetState(State* state, in Path path, in Graph.TempNode node) {
+            static byte GetState(safe_ptr<State> state, in Path path, in Graph.TempNode node) {
                 var chunk = path.chunks[state, node.chunkIndex];
-                if (chunk.flowField.isCreated == false) return false;
+                if (chunk.flowField.IsCreated == false) return 0;
                 return chunk.flowField[state, node.nodeIndex].hasLineOfSight;
             }
             
@@ -598,7 +605,7 @@ namespace ME.BECS.Pathfinding {
             var xDifAbs = math.abs(xDif);
             var yDifAbs = math.abs(yDif);
 
-            var hasLos = false;
+            byte hasLos = 0;
 
             var xDifOne = (int)math.sign(xDif);
             var yDifOne = (int)math.sign(yDif);
@@ -610,16 +617,16 @@ namespace ME.BECS.Pathfinding {
             if (xDifAbs >= yDifAbs) {
 
                 var info = Graph.GetCoordInfo(at.x + xDifOne, at.y, root.chunkWidth, root.chunkHeight, root.width, root.height);
-                if (info.IsValid() == true && GetState(this.world.state, in this.path, in info) == true) {
-                    hasLos = true;
+                if (info.IsValid() == true && GetState(this.world.state, in this.path, in info) == 1) {
+                    hasLos = 1;
                 }
             }
             //Check in the y direction
             if (yDifAbs >= xDifAbs) {
 
                 var info = Graph.GetCoordInfo(at.x, at.y + yDifOne, root.chunkWidth, root.chunkHeight, root.width, root.height);
-                if (info.IsValid() == true && GetState(this.world.state, in this.path, in info) == true) {
-                    hasLos = true;
+                if (info.IsValid() == true && GetState(this.world.state, in this.path, in info) == 1) {
+                    hasLos = 1;
                 }
             }
 
@@ -627,15 +634,15 @@ namespace ME.BECS.Pathfinding {
             if (yDifAbs > 0 && xDifAbs > 0) {
                 //If the diagonal doesn't have LOS, we don't
                 var info = Graph.GetCoordInfo(at.x + xDifOne, at.y + yDifOne, root.chunkWidth, root.chunkHeight, root.width, root.height);
-                if (info.IsValid() == true && GetState(this.world.state, in this.path, in info) == false) {
-                    hasLos = false;
+                if (info.IsValid() == true && GetState(this.world.state, in this.path, in info) == 0) {
+                    hasLos = 0;
                 } else if (yDifAbs == xDifAbs) {
                     // If we are an exact diagonal and either straight direction is a wall, we don't have LOS
                     var infoNode1 = Graph.GetCoordInfo(at.x + xDifOne, at.y, root.chunkWidth, root.chunkHeight, root.width, root.height);
                     var infoNode2 = Graph.GetCoordInfo(at.x, at.y + yDifOne, root.chunkWidth, root.chunkHeight, root.width, root.height);
                     if (infoNode1.IsValid() == false || root.chunks[this.world.state, infoNode1.chunkIndex].nodes[this.world.state, infoNode1.nodeIndex].cost > 1 || 
                         infoNode2.IsValid() == false || root.chunks[this.world.state, infoNode2.chunkIndex].nodes[this.world.state, infoNode2.nodeIndex].cost > 1) {
-                        hasLos = false;
+                        hasLos = 0;
                     }
                 }
             }

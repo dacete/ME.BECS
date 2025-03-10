@@ -1,9 +1,18 @@
-using ME.BECS.Transforms;
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+#endif
 
 namespace ME.BECS.Units {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using Unity.Mathematics;
+    using ME.BECS.Transforms;
+    using ME.BECS.Players;
 
     public static partial class UnitUtils {
 
@@ -12,7 +21,7 @@ namespace ME.BECS.Units {
         public const float UINT_TO_FLOAT = 1f / FLOAT_TO_UINT;
 
         [INLINE(256)]
-        public static float3 GetSpiralPosition(float3 center, int index, float radius) {
+        public static float3 GetSpiralPosition(in float3 center, int index, float radius) {
             if (index == 0) return center;
             // (dx, dy) is a vector - direction in which we move right now
             int dx = 0;
@@ -46,17 +55,25 @@ namespace ME.BECS.Units {
         
         [INLINE(256)]
         public static void DestroyUnit(in UnitAspect unit) {
-
+            
             RemoveFromSelectionGroup(in unit);
             RemoveFromCommandGroup(in unit);
-            unit.ent.DestroyHierarchy();
-
+            unit.IsDead = true;
+            unit.ent.DestroyEndTick();
+            
         }
 
         [INLINE(256)]
-        public static UnitAspect CreateUnit(in AgentType agentType, int treeIndex, JobInfo jobInfo) {
+        public static UnitAspect CreateUnit(in AgentType agentType, int treeIndex, in JobInfo jobInfo) {
 
-            var ent = Ent.New(jobInfo);
+            var ent = Ent.New(in jobInfo, editorName: "Unit");
+            return CreateUnit(in ent, in agentType, treeIndex);
+            
+        }
+
+        [INLINE(256)]
+        public static UnitAspect CreateUnit(in Ent ent, in AgentType agentType, int treeIndex) {
+            
             var unit = ent.GetOrCreateAspect<UnitAspect>();
             var rnd = ent.GetRandomVector2OnCircle(1f);
             var rndVec = new float3(rnd.x, 0f, rnd.y);
@@ -77,9 +94,9 @@ namespace ME.BECS.Units {
         }
 
         [INLINE(256)]
-        public static void LookToTarget(ref ME.BECS.Transforms.TransformAspect tr, in UnitAspect unit, in float3 prevPosition, float dt) {
+        public static void LookToTarget(in ME.BECS.Transforms.TransformAspect tr, in UnitAspect unit, in float3 target, tfloat dt) {
 
-            var lookDir = tr.position - prevPosition;
+            var lookDir = target - tr.position;
             if (math.lengthsq(lookDir) >= math.EPSILON) {
                 var speed = unit.rotationSpeed;
                 tr.rotation = math.slerp(tr.rotation, quaternion.LookRotation(lookDir, math.up()), dt * speed);
@@ -88,18 +105,18 @@ namespace ME.BECS.Units {
         }
 
         [INLINE(256)]
-        public static bool IsOwner(in Ent unit, ME.BECS.Players.PlayerAspect owner) {
-            return unit.Read<ME.BECS.Players.OwnerComponent>().ent == owner.ent;
+        public static bool IsOwner(in Ent unit, in PlayerAspect owner) {
+            return unit.Read<OwnerComponent>().ent == owner.ent;
         }
 
         [INLINE(256)]
-        public static bool IsTeam(in Ent unit, ME.BECS.Players.PlayerAspect owner) {
-            return GetTeam(unit) == ME.BECS.Players.PlayerUtils.GetTeam(owner);
+        public static bool IsTeam(in Ent unit, in PlayerAspect owner) {
+            return GetTeam(unit) == PlayerUtils.GetTeam(owner);
         }
 
         [INLINE(256)]
-        public static void SetOwner(in Ent unit, in ME.BECS.Players.PlayerAspect player) {
-            unit.Set(new ME.BECS.Players.OwnerComponent() {
+        public static void SetOwner(in Ent unit, in PlayerAspect player) {
+            unit.Set(new OwnerComponent() {
                 ent = player.ent,
             });
         }
@@ -107,14 +124,21 @@ namespace ME.BECS.Units {
         [INLINE(256)]
         public static Ent GetTeam(in Ent ent) {
 
-            return ME.BECS.Players.PlayerUtils.GetOwner(in ent).readTeam;
+            return PlayerUtils.GetOwner(in ent).readTeam;
+
+        }
+
+        [INLINE(256)]
+        public static Ent GetTeam(in EntRO ent) {
+
+            return PlayerUtils.GetOwner(in ent).readTeam;
 
         }
 
         [INLINE(256)]
         public static Ent GetTeam(in UnitAspect unit) {
 
-            return unit.readOwner.GetAspect<ME.BECS.Players.PlayerAspect>().readTeam;
+            return unit.readOwner.GetAspect<PlayerAspect>().readTeam;
 
         }
 
@@ -132,13 +156,13 @@ namespace ME.BECS.Units {
                 float3 rnd3d;
                 if (target.TryRead(out UnitQuadSizeComponent quad) == true) {
                     var rnd = sourceUnit.GetRandomVector2(-(float2)quad.size * 0.5f, (float2)quad.size * 0.5f);
-                    rnd3d = new float3(rnd.x, 0f, rnd.y);
+                    rnd3d = new float3(rnd.x, sourceUnit.GetRandomValue(0f, quad.height), rnd.y);
                     rnd3d = math.mul(tr.rotation, rnd3d);
                 } else {
                     var props = target.Read<NavAgentRuntimeComponent>().properties;
                     var radius = props.radius;
                     var rnd = sourceUnit.GetRandomVector2InCircle(radius);
-                    rnd3d = new float3(rnd.x, 0f, rnd.y);
+                    rnd3d = new float3(rnd.x, sourceUnit.GetRandomValue(0f, props.height), rnd.y);
                 }
                 pos += rnd3d;
             }

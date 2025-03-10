@@ -42,8 +42,8 @@ namespace ME.BECS.Network {
         public struct StatesStorageProperties {
 
             public static StatesStorageProperties Default => new StatesStorageProperties() {
-                capacity = 20u,
-                copyPerTick = 10,
+                capacity = 10u,
+                copyPerTick = 30u,
             };
 
             [UnityEngine.Tooltip("How many states we need to store.")]
@@ -70,7 +70,7 @@ namespace ME.BECS.Network {
         [UnityEngine.Tooltip("Input lag in ticks. How much ticks should be added to current tick when send network event.")]
         public uint inputLag;
         [UnityEngine.SerializeReference]
-        [ME.BECS.Extensions.SubclassSelector.SubclassSelectorAttribute(runtimeAssembliesOnly: true, showLabel = true)]
+        [ME.BECS.Extensions.SubclassSelector.SubclassSelectorAttribute(runtimeAssembliesOnly: true, showLabel = false)]
         [UnityEngine.Tooltip("Custom transport implementation for INetworkTransport interface.")]
         public INetworkTransport transport;
         public EventsStorageProperties eventsStorageProperties;
@@ -87,7 +87,7 @@ namespace ME.BECS.Network {
 
         public TransportStatus Status => this.network.networkTransport.Status;
         
-        public uint LocalPlayerId  => this.network.data->localPlayerId;
+        public uint LocalPlayerId  => this.network.data.ptr->localPlayerId;
 
         public override void OnAwake(ref World world) {
             this.network = new UnsafeNetworkModule(in world, this.properties);
@@ -107,14 +107,14 @@ namespace ME.BECS.Network {
 
         public bool IsInRollback() => this.network.IsInRollback();
 
-        public JobHandle UpdateInitializer(double dt, NetworkWorldInitializer initializer, JobHandle dependsOn, ref World world) {
+        public JobHandle UpdateInitializer(uint dtMs, NetworkWorldInitializer initializer, JobHandle dependsOn, ref World world) {
             
             {
                 var serverTime = this.network.networkTransport.ServerTime;
                 if (serverTime > this.GetCurrentTime()) {
                     this.SetServerTime(serverTime);
                 } else {
-                    this.SetServerTime(this.GetCurrentTime() + dt * 1000d);
+                    this.SetServerTime(this.GetCurrentTime() + dtMs);
                 }
             }
 
@@ -143,6 +143,10 @@ namespace ME.BECS.Network {
             this.network.SetServerTime(timeFromStart);
         }
 
+        public void SaveResetState() {
+            this.network.SaveResetState();
+        }
+
         public void RegisterMethod(NetworkMethodDelegate method) {
             this.network.RegisterMethod(method);
         }
@@ -152,11 +156,27 @@ namespace ME.BECS.Network {
         }
 
         public JobHandle Connect(JobHandle dependsOn) {
-            return this.network.networkTransport.Connect(in this.network.data->connectedWorld, this, dependsOn);
+            return this.network.networkTransport.Connect(in this.network.data.ptr->connectedWorld, this, dependsOn);
         }
 
-        public State* GetStartFrameState() {
-            return this.network.data->startFrameState;
+        public safe_ptr<State> GetStartFrameState() {
+            return this.network.data.ptr->startFrameState;
+        }
+
+        public INetworkTransport GetTransport() {
+            return this.network.GetTransport();
+        }
+
+        public ULongDictionaryAuto<SortedNetworkPackageList> GetEvents() {
+            return this.network.GetEvents();
+        }
+
+        public bool RewindTo(ulong targetTick) {
+            return this.network.RewindTo(targetTick);
+        }
+
+        public ulong GetCurrentTick() {
+            return this.network.data.ptr->connectedWorld.state.ptr->tick;
         }
 
     }

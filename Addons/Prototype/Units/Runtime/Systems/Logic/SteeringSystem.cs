@@ -1,9 +1,19 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+using Rect = ME.BECS.FixedPoint.Rect;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+using Rect = UnityEngine.Rect;
+#endif
 
 namespace ME.BECS.Units {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using BURST = Unity.Burst.BurstCompileAttribute;
-    using Unity.Mathematics;
     using ME.BECS.Jobs;
     using ME.BECS.Transforms;
 
@@ -13,50 +23,40 @@ namespace ME.BECS.Units {
     public struct SteeringSystem : IUpdate, IDrawGizmos {
 
         public static SteeringSystem Default => new SteeringSystem() {
-            calculateAvoidance = true,
             calculateSeparation = true,
             calculateCohesion = true,
             calculateAlignment = true,
-            alignmentSpeed = 3f,
-            maxAgentRadius = 2.5f,
         };
 
-        public bool calculateAvoidance;
         public bool calculateSeparation;
         public bool calculateCohesion;
         public bool calculateAlignment;
-        public float alignmentSpeed;
-        public float maxAgentRadius;
         public bool drawGizmos;
 
         [BURST(CompileSynchronously = true)]
-        public unsafe struct Job : IJobParallelForAspect<TransformAspect, UnitAspect> {
+        public struct Job : IJobForAspects<TransformAspect, UnitAspect, QuadTreeQueryAspect> {
 
             public SteeringSystem system;
-            public float dt;
             public World world;
             
-            public void Execute(in JobInfo jobInfo, ref TransformAspect tr, ref UnitAspect unit) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TransformAspect tr, ref UnitAspect unit, ref QuadTreeQueryAspect query) {
 
-                var facingCone = math.cos(math.radians(120f));
                 var collisionDir = float3.zero;
-                var avoidanceVector = float3.zero;
                 var cohesionVector = float3.zero;
                 var separationVector = float3.zero;
                 var alignmentVector = float3.zero;
                 var cohesionUnitsCount = 0u;
                 var alignmentUnitsCount = 0u;
-                var query = unit.ent.GetAspect<QuadTreeQueryAspect>();
-                var rangeSq = query.query.range * query.query.range;
+                var rangeSq = query.readQuery.rangeSqr;
                 var srcPos = tr.position;
                 srcPos.y = 0f;
-                for (uint i = 0, size = query.results.results.Count; i < size; ++i) {
-                    var ent = query.results.results[this.world.state, i];
-                    if (ent.IsAlive() == false) continue;
-                    if (ent == unit.ent) continue;
+                for (uint i = 0, size = query.readResults.results.Count; i < size; ++i) {
+                    var queryEnt = query.readResults.results[this.world.state, i];
+                    if (queryEnt.IsAlive() == false) continue;
+                    if (queryEnt == unit.ent) continue;
 
-                    var entTr = ent.GetAspect<TransformAspect>();
-                    var entUnit = ent.GetAspect<UnitAspect>();
+                    var entTr = queryEnt.GetAspect<TransformAspect>();
+                    var entUnit = queryEnt.GetAspect<UnitAspect>();
                     
                     if (entUnit.IsPathFollow == false && 
                         entUnit.IsHold == false &&
@@ -67,94 +67,66 @@ namespace ME.BECS.Units {
                     }
                     var targetPos = entTr.position;
                     targetPos.y = 0f;
-                    var vec = targetPos - srcPos;
+                    var vec = srcPos - targetPos;
                     if (math.all(vec == float3.zero) == true) {
                         vec = unit.randomVector;
                     }
                     var normal = math.normalizesafe(vec);
-
+                    var lengthSqr = math.lengthsq(vec);
+                    
                     // check collide with end
                     // if unit collides with another unit which stops
                     // and belongs to the same group
                     var isGroupEquals = entUnit.IsPathFollow == false &&
-                                        entUnit.unitCommandGroup == unit.unitCommandGroup;
+                                        entUnit.readUnitCommandGroup == unit.readUnitCommandGroup;
 
-                    var radiusSum = unit.radius + entUnit.radius;
-                    var radiusSumSq = radiusSum * radiusSum;
+                    var radiusSum = (unit.radius + entUnit.radius);
+                    var radiusSumSq = (radiusSum * radiusSum);
                     
-                    var lengthSqr = math.lengthsq(vec);
                     if (isGroupEquals == false && lengthSqr <= rangeSq && unit.IsPathFollow == true) {
-                        var isFacing = IsFacing(tr.right, normal, facingCone);
-                        var relativePos = srcPos - targetPos;
-                        var relativeVel = unit.velocity - entUnit.velocity;
-                        // check avoidance
-                        if (this.system.calculateAvoidance == true) {
-                            var relativeSpeed = math.lengthsq(relativeVel);
-                            if (relativeSpeed > 0f) {
-                                var timeToCollision = -1f * math.dot(relativePos, relativeVel) / (relativeSpeed * relativeSpeed);
-                                if (timeToCollision > 0f) {
-                                    avoidanceVector += relativePos + relativeVel * timeToCollision;
-                                }
-                            }
-                        }
-
                         // check separation
                         if (this.system.calculateSeparation == true) {
-                            var maxSepDistSq = 1f + this.system.maxAgentRadius;
-                            var distSq = math.lengthsq(relativePos);
-                            if (distSq < maxSepDistSq) {
-                                var strength = unit.accelerationSpeed * (maxSepDistSq - distSq) / (maxSepDistSq - radiusSumSq);
-                                separationVector += -normal * strength;
-                            }
+                            separationVector += -vec;
                         }
 
                         // check cohesion
                         if (this.system.calculateCohesion == true) {
-                            if (isFacing == true) {
-                                cohesionVector += targetPos;
-                                ++cohesionUnitsCount;
-                            }
+                            cohesionVector += targetPos;
+                            ++cohesionUnitsCount;
                         }
                         
                         // check alignment
                         if (this.system.calculateAlignment == true) {
-                            if (isFacing == true) {
-                                var vel = -relativeVel;
-                                vel /= unit.maxSpeed;
-                                alignmentVector += vel;
-                                ++alignmentUnitsCount;
-                            }
+                            alignmentVector += entUnit.readVelocity;
+                            ++alignmentUnitsCount;
                         }
                     }
 
-                    var length = math.sqrt(lengthSqr);
-                    if (length <= radiusSum) {
+                    if (unit.IsPathFollow == false && lengthSqr <= radiusSumSq) {
                         {
                             // move to normal
-                            var collision = -normal * (radiusSum - length);
+                            var collision = -normal * (radiusSum - math.sqrt(lengthSqr));
                             collisionDir += collision;
-                            //tr.position += collision;
                         }
                         {
                             // set the flag
                             if (isGroupEquals == true) {
-                                unit.collideWithEnd = true;
+                                unit.collideWithEnd = 1;
                             }
                         }
                     }
 
                 }
 
-                unit.componentRuntime.collisionDirection = math.normalizesafe(collisionDir);
-                unit.componentRuntime.avoidanceVector = math.normalizesafe(avoidanceVector);
-                unit.componentRuntime.separationVector = math.normalizesafe(separationVector);
+                unit.componentRuntime.collisionDirection = -math.normalizesafe(collisionDir);
+                unit.componentRuntime.separationVector = math.normalizesafe(-separationVector);
                 if (cohesionUnitsCount > 0u) {
-                    unit.componentRuntime.cohesionVector = math.normalizesafe(cohesionVector / cohesionUnitsCount);
+                    unit.componentRuntime.cohesionVector = math.normalizesafe(cohesionVector / cohesionUnitsCount - srcPos);
                 } else {
                     unit.componentRuntime.cohesionVector = float3.zero;
                 }
                 if (alignmentUnitsCount > 0u) {
-                    unit.componentRuntime.alignmentVector = math.lerp(unit.componentRuntime.alignmentVector, alignmentVector / alignmentUnitsCount, this.dt * this.system.alignmentSpeed);
+                    unit.componentRuntime.alignmentVector = math.normalizesafe(alignmentVector / alignmentUnitsCount);
                 } else {
                     unit.componentRuntime.alignmentVector = float3.zero;
                 }
@@ -162,7 +134,7 @@ namespace ME.BECS.Units {
             }
             
             [INLINE(256)]
-            private static bool IsFacing(float3 rightTransformVector, float3 normal, float cosineValue) {
+            private static bool IsFacing(float3 rightTransformVector, float3 normal, tfloat cosineValue) {
                 return math.dot(rightTransformVector, normal) >= cosineValue;
             }
 
@@ -170,10 +142,9 @@ namespace ME.BECS.Units {
 
         public void OnUpdate(ref SystemContext context) {
 
-            var dependsOn = API.Query(in context).Without<IsUnitStaticComponent>().Without<UnitHoldComponent>().Schedule<Job, TransformAspect, UnitAspect>(new Job() {
+            var dependsOn = context.Query().AsParallel().Without<IsUnitStaticComponent>().Without<UnitHoldComponent>().Schedule<Job, TransformAspect, UnitAspect, QuadTreeQueryAspect>(new Job() {
                 world = context.world,
                 system = this,
-                dt = context.deltaTime,
             });
             context.SetDependency(dependsOn);
             
@@ -183,12 +154,12 @@ namespace ME.BECS.Units {
 
             if (this.drawGizmos == false) return;
             
-            var arr = API.Query(in context).Without<IsUnitStaticComponent>().Without<UnitHoldComponent>().WithAspect<UnitAspect>().WithAspect<TransformAspect>().ToArray();
+            var arr = context.Query().AsParallel().Without<IsUnitStaticComponent>().Without<UnitHoldComponent>().WithAspect<UnitAspect>().WithAspect<TransformAspect>().ToArray();
             foreach (var unitEnt in arr) {
 
                 var tr = unitEnt.GetAspect<TransformAspect>();
                 var unit = unitEnt.GetAspect<UnitAspect>();
-                UnityEngine.Gizmos.DrawWireSphere(tr.position, unit.readRadius);
+                UnityEngine.Gizmos.DrawWireSphere((UnityEngine.Vector3)tr.position, (float)unit.readRadius);
 
             }
             

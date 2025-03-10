@@ -28,6 +28,16 @@ namespace ME.BECS {
             }
         }
 
+        private static MethodInfo startMethodCache;
+        private static MethodInfo startMethod {
+            get {
+                if (startMethodCache == null) {
+                    startMethodCache = typeof(BurstCompileMethod).GetMethod(nameof(BurstCompileMethod.MakeStart)); 
+                }
+                return startMethodCache;
+            }
+        }
+
         private static MethodInfo updateMethodCache;
         private static MethodInfo updateMethod {
             get {
@@ -68,6 +78,13 @@ namespace ME.BECS {
         }
 
         [Preserve]
+        public static void MakeStart<T>(System.IntPtr node) where T : unmanaged, IStart {
+            
+            BurstCompileOnStart<T>.MakeMethod((Node*)node);
+            
+        }
+
+        [Preserve]
         public static void MakeUpdate<T>(System.IntPtr node) where T : unmanaged, IUpdate {
             
             BurstCompileOnUpdate<T>.MakeMethod((Node*)node);
@@ -88,41 +105,41 @@ namespace ME.BECS {
             
         }
 
-        private static void MakeMethod_INTERNAL<T>(Node* node, MethodInfo methodInfo) where T : unmanaged, ISystem {
+        private static void MakeMethod_INTERNAL<T>(safe_ptr<Node> node, MethodInfo methodInfo) where T : unmanaged, ISystem {
             var gMethod = methodInfo.MakeGenericMethod(typeof(T));
-            parameters[0] = (System.IntPtr)node;
+            parameters[0] = (System.IntPtr)node.ptr;
             gMethod.Invoke(null, parameters);
         }
 
-        public static Method MakeMethod<T>(Node* node) where T : unmanaged, ISystem {
+        public static Method MakeMethod<T>(safe_ptr<Node> node) where T : unmanaged, ISystem {
             
             var method = Method.Undefined;
             
             if (typeof(IAwake).IsAssignableFrom(typeof(T))) {
                 method = Method.Awake;
                 var methodPtr = _make(new Node.Data());
-                node->SetMethod(method, methodPtr);
+                node.ptr->SetMethod(method, methodPtr);
                 BurstCompileMethod.MakeMethod_INTERNAL<T>(node, awakeMethod);
             }
             
             if (typeof(IUpdate).IsAssignableFrom(typeof(T))) {
                 method = Method.Update;
                 var methodPtr = _make(new Node.Data());
-                node->SetMethod(method, methodPtr);
+                node.ptr->SetMethod(method, methodPtr);
                 BurstCompileMethod.MakeMethod_INTERNAL<T>(node, updateMethod);
             }
             
             if (typeof(IDestroy).IsAssignableFrom(typeof(T))) {
                 method = Method.Destroy;
                 var methodPtr = _make(new Node.Data());
-                node->SetMethod(method, methodPtr);
+                node.ptr->SetMethod(method, methodPtr);
                 BurstCompileMethod.MakeMethod_INTERNAL<T>(node, destroyMethod);
             }
 
             if (typeof(IDrawGizmos).IsAssignableFrom(typeof(T))) {
                 method = Method.DrawGizmos;
                 var methodPtr = _make(new Node.Data());
-                node->SetMethod(method, methodPtr);
+                node.ptr->SetMethod(method, methodPtr);
                 BurstCompileMethod.MakeMethod_INTERNAL<T>(node, drawGizmosMethod);
             }
 

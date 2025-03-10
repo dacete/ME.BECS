@@ -65,34 +65,56 @@ namespace ME.BECS {
 
             this.world = World.Create(this.properties);
             
+            this.DoWorldAwake();
+
+        }
+
+        protected virtual void DoWorldAwake() {
+            
+            Context.Switch(in this.world);
+            this.previousFrameDependsOn.Complete();
+            for (var i = 0; i < this.modules.list.Length; ++i) {
+                var module = this.modules.list[i];
+                if (module.IsEnabled() == false) continue;
+                module.obj.worldProperties = this.properties;
+                this.previousFrameDependsOn.Complete();
+                module.obj.OnAwake(ref this.world);
+            }
+
+            this.OnAwake();
+
+            this.previousFrameDependsOn = this.world.Awake(this.previousFrameDependsOn);
+            
         }
 
         protected virtual void Start() {
 
             if (this.world.isCreated == true) {
                 
+                this.previousFrameDependsOn.Complete();
+                Context.Switch(in this.world);
                 for (var i = 0; i < this.modules.list.Length; ++i) {
                     var module = this.modules.list[i];
                     if (module.IsEnabled() == false) continue;
                     module.obj.worldProperties = this.properties;
-                    module.obj.OnAwake(ref this.world);
-                }
-
-                this.OnAwake();
-
-                this.previousFrameDependsOn = this.world.Awake(this.previousFrameDependsOn);
-                
-                for (var i = 0; i < this.modules.list.Length; ++i) {
-                    var module = this.modules.list[i];
-                    if (module.IsEnabled() == false) continue;
-                    module.obj.worldProperties = this.properties;
+                    this.previousFrameDependsOn.Complete();
                     this.previousFrameDependsOn = module.obj.OnStart(ref this.world, this.previousFrameDependsOn);
                 }
                 
                 this.previousFrameDependsOn = this.OnStart(this.previousFrameDependsOn);
 
+                this.DoWorldStart();
+
+                this.previousFrameDependsOn.Complete();
+
             }
 
+        }
+
+        protected virtual void DoWorldStart() {
+            
+            this.previousFrameDependsOn = this.world.Start(this.previousFrameDependsOn);
+            
         }
 
         public virtual void OnAwake() {
@@ -103,11 +125,15 @@ namespace ME.BECS {
             return dependsOn;
         }
 
+        public virtual uint GetDeltaTimeMs() {
+            return (uint)(Time.deltaTime * 1000u);
+        }
+
         protected JobHandle DoUpdate(ushort updateType, JobHandle dependsOn) {
 
             this.previousFrameDependsOn = dependsOn;
             if (this.world.isCreated == true) {
-                this.previousFrameDependsOn = this.world.Tick(Time.deltaTime, updateType, this.previousFrameDependsOn);
+                this.previousFrameDependsOn = this.world.Tick(this.GetDeltaTimeMs(), updateType, this.previousFrameDependsOn);
             }
 
             return this.previousFrameDependsOn;
@@ -118,6 +144,7 @@ namespace ME.BECS {
             if (this.world.isCreated == true) {
                 ProfilerCounters.Initialize();
                 ProfilerCounters.SampleWorldBeginFrame(in this.world);
+                dependsOn = this.world.RaiseEvents(dependsOn);
             }
             return dependsOn;
         }
@@ -130,7 +157,8 @@ namespace ME.BECS {
                 ProfilerCounters.SampleWorldEndFrame(in this.world);
             }
 
-            WorldsTempAllocator.Reset();
+            this.previousFrameDependsOn.Complete();
+            WorldsTempAllocator.Reset(this.world.id);
             
         }
 
@@ -145,6 +173,8 @@ namespace ME.BECS {
 
         protected virtual void OnDestroy() {
 
+            this.previousFrameDependsOn.Complete();
+            
             for (var i = 0; i < this.modules.list.Length; ++i) {
                 var module = this.modules.list[i];
                 if (module.IsEnabled() == false) continue;

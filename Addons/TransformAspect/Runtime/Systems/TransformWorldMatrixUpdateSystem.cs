@@ -1,43 +1,69 @@
 namespace ME.BECS.Transforms {
 
+    using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
     using BURST = Unity.Burst.BurstCompileAttribute;
     using Jobs;
-    using Unity.Jobs;
     
     [UnityEngine.Tooltip("Update all entities with TransformAspect (LocalPosition and LocalRotation components are required).")]
     [BURST(CompileSynchronously = true)]
-    public struct TransformWorldMatrixUpdateSystem : IUpdate {
+    public struct TransformWorldMatrixUpdateSystem : IAwake, IUpdate {
         
         [BURST(CompileSynchronously = true)]
-        public struct CalculateRootsJob : IJobParallelForAspect<TransformAspect> {
+        public struct CalculateLocalMatrixJob : IJobForAspects<TransformAspect> {
 
-            public void Execute(in JobInfo jobInfo, ref TransformAspect aspect) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TransformAspect aspect) {
 
-                Transform3DExt.CalculateMatrix(in aspect);
+                Transform3DExt.CalculateLocalMatrix(in aspect);
 
             }
 
         }
 
         [BURST(CompileSynchronously = true)]
-        public struct CalculateRootsWithChildrenJob : IJobParallelForAspect<TransformAspect> {
+        public struct CalculateRootsJob : IJobForAspects<TransformAspect> {
 
-            public void Execute(in JobInfo jobInfo, ref TransformAspect aspect) {
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TransformAspect aspect) {
 
-                Transform3DExt.CalculateMatrixHierarchy(aspect.parent, in aspect);
+                Transform3DExt.CalculateWorldMatrix(in aspect);
 
             }
+
+        }
+
+        [BURST(CompileSynchronously = true)]
+        public struct CalculateRootsWithChildrenJob : IJobFor1Aspects2Components<TransformAspect, ParentComponent, IsFirstLevelComponent> {
+
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TransformAspect aspect, ref ParentComponent parent, ref IsFirstLevelComponent isFirstLevelComponent) {
+
+                Transform3DExt.CalculateWorldMatrixHierarchy(parent.value, in aspect);
+
+            }
+
+        }
+
+        public void OnAwake(ref SystemContext context) {
+
+            Calculate(ref context);
 
         }
 
         public void OnUpdate(ref SystemContext context) {
+
+            Calculate(ref context);
             
-            // update roots
-            var rootsHandle = API.Query(in context).Without<ParentComponent>().Schedule<CalculateRootsJob, TransformAspect>();
-            // update children with roots
-            var rootsWithChildrenHandle = API.Query(in context, rootsHandle).With<ParentComponent>().With<IsFirstLevelComponent>().Schedule<CalculateRootsWithChildrenJob, TransformAspect>();
+        }
+
+        [INLINE(256)]
+        private static void Calculate(ref SystemContext context) {
+            
+            // Calculate local matrix
+            var localMatrixHandle = context.Query().AsParallel().Schedule<CalculateLocalMatrixJob, TransformAspect>();
+            // Update roots
+            var rootsHandle = context.Query(localMatrixHandle).AsParallel().Without<ParentComponent>().Schedule<CalculateRootsJob, TransformAspect>();
+            // Update children with roots
+            var rootsWithChildrenHandle = context.Query(rootsHandle).AsParallel().Schedule<CalculateRootsWithChildrenJob, TransformAspect, ParentComponent, IsFirstLevelComponent>();
             context.SetDependency(rootsWithChildrenHandle);
-            
+
         }
 
     }

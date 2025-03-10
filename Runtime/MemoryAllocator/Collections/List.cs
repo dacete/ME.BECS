@@ -9,6 +9,8 @@ namespace ME.BECS {
     [System.Diagnostics.DebuggerTypeProxyAttribute(typeof(ListProxy<>))]
     public unsafe struct List<T> : IIsCreated where T : unmanaged {
 
+        public const int SIZE = MemArray<T>.SIZE + sizeof(uint);
+
         public struct Enumerator {
             
             private readonly List<T> list;
@@ -27,12 +29,12 @@ namespace ME.BECS {
 
         }
 
-        internal MemArray<T> arr;
+        private MemArray<T> arr;
         public uint Count;
 
-        public readonly bool isCreated {
+        public readonly bool IsCreated {
             [INLINE(256)]
-            get => this.arr.isCreated;
+            get => this.arr.IsCreated;
         }
 
         public uint Capacity {
@@ -94,7 +96,7 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public readonly void* GetUnsafePtr(in MemoryAllocator allocator) {
+        public readonly safe_ptr GetUnsafePtr(in MemoryAllocator allocator) {
 
             E.IS_CREATED(this);
             return this.arr.GetUnsafePtr(allocator);
@@ -129,7 +131,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public readonly Enumerator GetEnumerator() {
 
-            if (this.isCreated == false) return default;
+            if (this.IsCreated == false) return default;
             return new Enumerator(in this);
             
         }
@@ -142,7 +144,7 @@ namespace ME.BECS {
 
         }
 
-        public ref T this[State* state, uint index] {
+        public ref T this[safe_ptr<State> state, uint index] {
             [INLINE(256)]
             get {
                 E.RANGE(index, 0, this.Count);
@@ -162,8 +164,7 @@ namespace ME.BECS {
         private bool EnsureCapacity(ref MemoryAllocator allocator, uint capacity) {
 
             capacity = Helpers.NextPot(capacity);
-            if (this.arr.isCreated == false) this.arr.growFactor = 1;
-            return this.arr.Resize(ref allocator, capacity, ClearOptions.UninitializedMemory);
+            return this.arr.Resize(ref allocator, capacity, 2, ClearOptions.UninitializedMemory);
             
         }
         
@@ -277,7 +278,7 @@ namespace ME.BECS {
         [INLINE(256)]
         public bool Resize(ref MemoryAllocator allocator, uint newLength) {
 
-            if (this.isCreated == false) {
+            if (this.IsCreated == false) {
                 
                 this = new List<T>(ref allocator, newLength);
                 return true;
@@ -365,8 +366,8 @@ namespace ME.BECS {
             var count = (uint)collection.Length;
             if (count > 0u) {
                 this.EnsureCapacity(ref allocator, this.Count + count);
-                var size = sizeof(T);
-                _memcpy(collection.GetUnsafeReadOnlyPtr(), (byte*)this.arr.GetUnsafePtr(in allocator) + index * size, count * size);
+                var size = TSize<T>.size;
+                _memcpy((safe_ptr)collection.GetUnsafeReadOnlyPtr(), (safe_ptr)(this.arr.GetUnsafePtr(in allocator) + index * size), count * size);
                 this.Count += count;
             }
         }
@@ -380,8 +381,8 @@ namespace ME.BECS {
             var count = (uint)collection.Length;
             if (count > 0u) {
                 this.EnsureCapacity(ref allocator, this.Count + count);
-                var size = sizeof(T);
-                _memcpy(collection.Ptr, (byte*)this.arr.GetUnsafePtr(in allocator) + index * size, count * size);
+                var size = TSize<T>.size;
+                _memcpy((safe_ptr)collection.Ptr, (safe_ptr)(this.arr.GetUnsafePtr(in allocator) + index * size), count * size);
                 this.Count += count;
             }
         }
@@ -419,8 +420,8 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public void Sort<U>(State* state) where U : unmanaged, System.IComparable<U> {
-            Unity.Collections.NativeSortExtension.Sort((U*)this.GetUnsafePtr(in state->allocator), (int)this.Count);
+        public void Sort<U>(safe_ptr<State> state) where U : unmanaged, System.IComparable<U> {
+            Unity.Collections.NativeSortExtension.Sort((U*)this.GetUnsafePtr(in state.ptr->allocator).ptr, (int)this.Count);
         }
 
         public uint GetReservedSizeInBytes() {

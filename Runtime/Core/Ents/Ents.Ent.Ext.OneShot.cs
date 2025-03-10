@@ -41,9 +41,10 @@ namespace ME.BECS {
         public static bool SetOneShot<T>(in this Ent ent, in T data, OneShotType type) where T : unmanaged, IComponent {
 
             E.IS_ALIVE(ent);
+            E.IS_IN_TICK(ent.World.state);
             var world = ent.World;
-            var result = (type == OneShotType.CurrentTick && world.state->batches.Set(in ent, in data, world.state));
-            world.state->oneShotTasks.Add(world.state, in ent, in data, world.state->updateType, type);
+            var result = (type == OneShotType.CurrentTick && Batches.Set(in ent, in data, world.state));
+            OneShotTasks.Add(world.state, in ent, in data, world.state.ptr->updateType, type);
             return result;
 
         }

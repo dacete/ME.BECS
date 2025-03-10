@@ -22,7 +22,7 @@ namespace ME.BECS.Tests {
 
             var world = World.Create();
 
-            var dt = 0.01f;
+            var dt = 100u;
             {
                 var systemGroup = SystemGroup.Create();
                 systemGroup.Add<TestSystem1>();
@@ -59,7 +59,7 @@ namespace ME.BECS.Tests {
 
             var world = World.Create();
 
-            var dt = 0.01f;
+            var dt = 100u;
             {
                 var systemGroup = SystemGroup.Create();
                 systemGroup.Add<TestSystemDefer1>();
@@ -86,7 +86,7 @@ namespace ME.BECS.Tests {
 
             var world = World.Create();
 
-            var dt = 0.01f;
+            var dt = 100u;
             {
                 var systemGroup = SystemGroup.Create();
                 systemGroup.Add<TestSystem2>();
@@ -106,7 +106,7 @@ namespace ME.BECS.Tests {
 
             var world = World.Create();
 
-            var dt = 0.01f;
+            var dt = 100u;
             {
                 var systemGroup = SystemGroup.Create();
                 systemGroup.Add<TestSystem3>();
@@ -126,7 +126,7 @@ namespace ME.BECS.Tests {
 
             var world = World.Create();
 
-            var dt = 0.01f;
+            var dt = 100u;
             {
                 var systemGroup = SystemGroup.Create();
                 systemGroup.Add<TestSystem4>();
@@ -252,7 +252,7 @@ namespace ME.BECS.Tests {
             }
 
             [Unity.Burst.BurstCompileAttribute]
-            public struct JobComponents : IJobComponents<TestComponent> {
+            public struct JobForComponents : IJobForComponents<TestComponent> {
 
                 public Unity.Collections.NativeReference<int> sum;
 
@@ -293,10 +293,10 @@ namespace ME.BECS.Tests {
                     Assert.AreEqual(2, val);
                 }
                 {
-                    var job = new JobComponents() {
+                    var job = new JobForComponents() {
                         sum = new Unity.Collections.NativeReference<int>(0, Constants.ALLOCATOR_TEMPJOB),
                     };
-                    var handle = this.query.Schedule<JobComponents, TestComponent>(job, context);
+                    var handle = this.query.Schedule<JobForComponents, TestComponent>(job, context);
                     context.SetDependency(handle);
                     handle.Complete();
                     var val = job.sum.Value;

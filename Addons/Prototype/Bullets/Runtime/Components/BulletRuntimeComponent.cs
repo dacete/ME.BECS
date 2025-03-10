@@ -1,7 +1,16 @@
-namespace ME.BECS.Bullets {
-    
-    using Unity.Mathematics;
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+#endif
 
+namespace ME.BECS.Bullets {
+
+    [ComponentGroup(typeof(BulletComponentGroup))]
     public struct BulletRuntimeComponent : IComponent {
 
         /// <summary>

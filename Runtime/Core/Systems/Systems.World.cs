@@ -3,6 +3,7 @@ namespace ME.BECS {
     using Unity.Jobs;
     using static Cuts;
     using Unity.Collections;
+    using Unity.Collections.LowLevel.Unsafe;
     
     public class WorldSystemRegistry {
 
@@ -17,6 +18,26 @@ namespace ME.BECS {
             
         }
         
+    }
+
+    public readonly unsafe struct SystemLink<T> : IIsCreated where T : unmanaged {
+
+        [NativeDisableUnsafePtrRestriction]
+        private readonly T* ptr;
+
+        public bool IsCreated => this.ptr != null;
+        
+        internal SystemLink(T* ptr) {
+            this.ptr = ptr;
+        }
+
+        public ref T Value {
+            get {
+                E.IS_CREATED(this);
+                return ref *this.ptr;
+            }
+        }
+
     }
     
     public static unsafe class SystemsWorldExt {
@@ -35,7 +56,7 @@ namespace ME.BECS {
             if (WorldSystemRegistry.systemGroups.TryGetValue(address, out var rootGroup) == true) {
                 
                 // if we have static data
-                if (SystemsStatic.RaiseOnAwake(in rootGroup, subId, 0f, ref world, ref dependsOn) == false) {
+                if (SystemsStatic.RaiseOnAwake(in rootGroup, subId, 0u, ref world, ref dependsOn) == false) {
 
                     dependsOn = rootGroup.Awake(ref world, subId, dependsOn);
 
@@ -46,7 +67,28 @@ namespace ME.BECS {
             return dependsOn;
 
         }
-        
+
+        public static JobHandle Start(this ref World world, JobHandle dependsOn, ushort subId = 0) {
+            
+            E.IS_CREATED(world);
+            dependsOn = Batches.Apply(dependsOn, world.state);
+            var address = world.id;
+            WorldSystemRegistry.Validate();
+            if (WorldSystemRegistry.systemGroups.TryGetValue(address, out var rootGroup) == true) {
+                
+                // if we have static data
+                if (SystemsStatic.RaiseOnStart(in rootGroup, subId, 0u, ref world, ref dependsOn) == false) {
+
+                    dependsOn = rootGroup.Start(ref world, subId, dependsOn);
+
+                }
+                
+            }
+
+            return dependsOn;
+
+        }
+
         public static void DrawGizmos(this ref World world) {
             world.DrawGizmos(default).Complete();
         }
@@ -71,7 +113,7 @@ namespace ME.BECS {
 
         }
 
-        internal static JobHandle TickRootSystemGroup(this ref World world, float dt, ushort updateType, JobHandle dependsOn) {
+        internal static JobHandle TickRootSystemGroup(this ref World world, uint deltaTimeMs, ushort updateType, JobHandle dependsOn) {
 
             E.IS_CREATED(world);
             var address = world.id;
@@ -79,9 +121,9 @@ namespace ME.BECS {
             if (WorldSystemRegistry.systemGroups.TryGetValue(address, out var rootGroup) == true) {
 
                 // if we have static data
-                if (SystemsStatic.RaiseOnUpdate(in rootGroup, updateType, dt, ref world, ref dependsOn) == false) {
+                if (SystemsStatic.RaiseOnUpdate(in rootGroup, updateType, deltaTimeMs, ref world, ref dependsOn) == false) {
 
-                    dependsOn = rootGroup.Update(ref world, dt, updateType, dependsOn);
+                    dependsOn = rootGroup.Update(ref world, deltaTimeMs, updateType, dependsOn);
 
                 }
 
@@ -131,7 +173,7 @@ namespace ME.BECS {
             if (WorldSystemRegistry.systemGroups.TryGetValue(address, out var rootGroup) == true) {
 
                 // if we have static data
-                if (SystemsStatic.RaiseOnDestroy(in rootGroup, 0, 0f, ref world, ref dependsOn) == false) {
+                if (SystemsStatic.RaiseOnDestroy(in rootGroup, 0, 0u, ref world, ref dependsOn) == false) {
                     dependsOn = rootGroup.Destroy(ref world, 0, dependsOn);
                 }
 
@@ -145,23 +187,40 @@ namespace ME.BECS {
 
         }
 
+        public static SystemLink<T> GetSystemLink<T>(this in World world) where T : unmanaged, ISystem {
+
+            return new SystemLink<T>(world.GetSystemPtr<T>(throwIfNotFound: false));
+            
+        }
+
         public static ref T GetSystem<T>(this in World world) where T : unmanaged, ISystem {
+
+            return ref _ref(world.GetSystemPtr<T>());
+            
+        }
+
+        public static T* GetSystemPtr<T>(this in World world, bool throwIfNotFound = true) where T : unmanaged, ISystem {
             
             E.IS_CREATED(world);
             var address = world.id;
             WorldSystemRegistry.Validate();
             if (WorldSystemRegistry.systemGroups.TryGetValue(address, out var rootGroup) == true) {
-                if (SystemsStatic.TryGetSystem<T>(out var system) == false) {
+                if (SystemsStatic.TryGetSystem<T>(in rootGroup, out var system) == false) {
                     var systemAddr = _addressT(ref rootGroup.GetSystem<T>(out var found));
-                    if (found == false) throw E.NOT_FOUND(typeof(T).Name);
-                    return ref _ref(systemAddr);
+                    if (throwIfNotFound == true && found == false) throw E.NOT_FOUND(typeof(T).Name);
+                    if (throwIfNotFound == false) return null;
+                    return systemAddr.ptr;
                 } else {
-                    return ref _ref(system);
+                    return system;
                 }
             }
 
-            throw E.NOT_FOUND(typeof(T).Name);
+            if (throwIfNotFound == true) {
+                throw E.NOT_FOUND(typeof(T).Name);
+            }
 
+            return null;
+            
         }
 
     }

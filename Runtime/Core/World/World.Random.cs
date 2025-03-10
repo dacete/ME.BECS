@@ -1,7 +1,16 @@
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+#endif
+
 namespace ME.BECS {
     
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
-    using Unity.Mathematics;
     using Unity.Jobs.LowLevel.Unsafe;
 
     public struct RandomProcessor {
@@ -20,13 +29,15 @@ namespace ME.BECS {
 
         public uint data;
         public LockSpinner lockIndex;
+        
+        public int Hash => Utils.Hash(this.data);
 
         [INLINE(256)]
-        public void SetSeed(State* statePtr, uint seed) {
+        public void SetSeed(safe_ptr<State> statePtr, uint seed) {
             this.data = seed;
         }
 
-        public static RandomData Create(State* statePtr) {
+        public static RandomData Create(safe_ptr<State> statePtr) {
             return new RandomData() { data = 1u };
         }
 
@@ -34,20 +45,20 @@ namespace ME.BECS {
     
     internal unsafe struct RandomState : System.IDisposable {
 
-        public State* state;
+        public safe_ptr<State> state;
         public Random random;
         
         [INLINE(256)]
-        public RandomState(State* state) {
+        public RandomState(safe_ptr<State> state) {
             this.state = state;
-            this.state->random.lockIndex.Lock();
-            this.random = new Random(this.state->random.data);
+            this.state.ptr->random.lockIndex.Lock();
+            this.random = new Random(this.state.ptr->random.data);
         }
 
         [INLINE(256)]
         public void Dispose() {
-            this.state->random.data = this.random.state;
-            this.state->random.lockIndex.Unlock();
+            this.state.ptr->random.data = this.random.state;
+            this.state.ptr->random.lockIndex.Unlock();
         }
 
     }

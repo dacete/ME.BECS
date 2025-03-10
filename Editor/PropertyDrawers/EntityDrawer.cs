@@ -98,9 +98,9 @@ namespace ME.BECS.Editor {
             }
 
             var obj = PropertyEditorUtils.GetTargetObjectOfProperty(this.property ?? this.propertySerializedObject.FindProperty(this.propertyPath));
-            if (obj == null) return;
+            if (obj == null || obj is not Ent ent) return;
             
-            this.entity = (Ent)obj;
+            this.entity = ent;
             var world = this.entity.World;
             if (this.entity.IsAlive() == true && this.version != this.entity.Version) {
                 this.FetchDataFromEntity(world);
@@ -132,7 +132,7 @@ namespace ME.BECS.Editor {
 
         private uint GetArchId() {
             var world = this.entity.World;
-            return world.state->archetypes.entToArchetypeIdx[world.state->allocator, this.entity.id];
+            return world.state.ptr->archetypes.entToArchetypeIdx[world.state.ptr->allocator, this.entity.id];
         }
 
         private void UpdateData() {
@@ -154,6 +154,7 @@ namespace ME.BECS.Editor {
             var idString = "-";
             var genString = "-";
             var worldString = "-";
+            var editorNameString = string.Empty;
             var versionString = string.Empty;
             var drawComponents = true;
 
@@ -163,7 +164,8 @@ namespace ME.BECS.Editor {
                 genString = this.entity.gen.ToString();
                 worldString = this.entity.worldId.ToString();
                 versionString = this.entity.Version.ToString();
-                
+                editorNameString = this.entity.EditorName.ToString();
+
             } else {
 
                 drawComponents = false;
@@ -176,6 +178,7 @@ namespace ME.BECS.Editor {
                 genString = "-";
                 worldString = "-";
                 versionString = "-";
+                editorNameString = string.Empty;
                 drawComponents = false;
 
             }
@@ -213,6 +216,21 @@ namespace ME.BECS.Editor {
                 entityIdLabel.AddToClassList("entity-name-label");
                 entityIdLabel.AddToClassList("label-header");
                 idContainer.Add(entityIdLabel);
+            }
+
+            {
+                var nameContainer = new VisualElement();
+                nameContainer.style.display = new StyleEnum<DisplayStyle>(string.IsNullOrEmpty(editorNameString) == true ? DisplayStyle.None : DisplayStyle.Flex);
+                nameContainer.AddToClassList("entity-name-container");
+                header.Add(nameContainer);
+                var entityNameLabel = new Label("Name");
+                entityNameLabel.AddToClassList("entity-name-label");
+                entityNameLabel.AddToClassList("label-header");
+                nameContainer.Add(entityNameLabel);
+                var entityName = new Label(editorNameString);
+                entityName.AddToClassList("entity-name");
+                entityName.AddToClassList("label-value");
+                nameContainer.Add(entityName);
             }
 
             {
@@ -407,8 +425,8 @@ namespace ME.BECS.Editor {
         private readonly System.Collections.Generic.List<VisualElement> cachedFieldsSharedComponents = new System.Collections.Generic.List<VisualElement>();
         private void RedrawComponents(World world) {
             
-            DrawFields(this.entity, this.componentContainerComponentsRoot, this.componentContainerComponents, this.cachedFieldsComponents, world, this.tempObject.data, this.serializedObj, nameof(TempObject.data), methodSetComponent, methodReadComponent);
-            DrawFields(this.entity, this.componentContainerSharedComponentsRoot, this.componentContainerSharedComponents, this.cachedFieldsSharedComponents, world, this.tempObject.dataShared, this.serializedObj, nameof(TempObject.dataShared), methodSetSharedComponent, methodReadSharedComponent);
+            DrawFields(this.entity, this.componentContainerComponentsRoot, this.componentContainerComponents, this.cachedFieldsComponents, world, this.tempObject.data, this.tempObject.dataHas, this.serializedObj, nameof(TempObject.data), methodSetComponent, methodReadComponent);
+            DrawFields(this.entity, this.componentContainerSharedComponentsRoot, this.componentContainerSharedComponents, this.cachedFieldsSharedComponents, world, this.tempObject.dataShared, this.tempObject.dataSharedHas, this.serializedObj, nameof(TempObject.dataShared), methodSetSharedComponent, methodReadSharedComponent);
             
         }
         
@@ -428,38 +446,60 @@ namespace ME.BECS.Editor {
         
         private void FetchComponentsFromEntity(World world) {
             
-            var archId = world.state->archetypes.entToArchetypeIdx[world.state->allocator, this.entity.id];
-            var arch = world.state->archetypes.list[world.state->allocator, archId];
+            var archId = world.state.ptr->archetypes.entToArchetypeIdx[world.state.ptr->allocator, this.entity.id];
+            var arch = world.state.ptr->archetypes.list[world.state.ptr->allocator, archId];
                     
             var methodRead = typeof(Components).GetMethod(nameof(Components.ReadDirect));
+            var methodHas = typeof(Components).GetMethod(nameof(Components.HasDirectEnabled));
+            var cnt = 0;
+            {
+                var e = arch.components.GetEnumerator(world);
+                while (e.MoveNext() == true) {
+                    var cId = e.Current;
+                    if (StaticTypesLoadedManaged.loadedTypes.ContainsKey(cId) == true) ++cnt;
+                }
+            }
 
             if (this.tempObject.data != null &&
-                this.tempObject.data.Length == arch.components.count) {
-                var i = 0;
-                var e = arch.components.GetEnumerator(world);
-                while (e.MoveNext() == true) {
-                    var cId = e.Current;
-                    var type = StaticTypesLoadedManaged.loadedTypes[cId];
-                    {
-                        var gMethod = methodRead.MakeGenericMethod(type);
-                        var val = gMethod.Invoke(world.state->components, new object[] { this.entity });
-                        this.tempObject.data[i] = val;
+                this.tempObject.data.Length == cnt) {
+                
+                {
+                    var i = 0;
+                    var e = arch.components.GetEnumerator(world);
+                    while (e.MoveNext() == true) {
+                        var cId = e.Current;
+                        if (StaticTypesLoadedManaged.loadedTypes.TryGetValue(cId, out var type) == true) {
+                            {
+                                var gMethod = methodRead.MakeGenericMethod(type);
+                                var gMethodHas = methodHas.MakeGenericMethod(type);
+                                var val = gMethod.Invoke(null, new object[] { this.entity });
+                                this.tempObject.data[i] = val;
+                                this.tempObject.dataHas[i] = (bool)gMethodHas.Invoke(null, new object[] { this.entity });
+                            }
+                            ++i;
+                        }
                     }
-                    ++i;
                 }
             } else {
-                this.tempObject.data = new object[arch.components.Count];
-                var i = 0;
-                var e = arch.components.GetEnumerator(world);
-                while (e.MoveNext() == true) {
-                    var cId = e.Current;
-                    var type = StaticTypesLoadedManaged.loadedTypes[cId];
-                    {
-                        var gMethod = methodRead.MakeGenericMethod(type);
-                        var val = gMethod.Invoke(world.state->components, new object[] { this.entity });
-                        this.tempObject.data[i] = val;
+                
+                this.tempObject.data = new object[cnt];
+                this.tempObject.dataHas = new bool[cnt];
+                {
+                    var i = 0;
+                    var e = arch.components.GetEnumerator(world);
+                    while (e.MoveNext() == true) {
+                        var cId = e.Current;
+                        if (StaticTypesLoadedManaged.loadedTypes.TryGetValue(cId, out var type) == true) {
+                            {
+                                var gMethod = methodRead.MakeGenericMethod(type);
+                                var gMethodHas = methodHas.MakeGenericMethod(type);
+                                var val = gMethod.Invoke(null, new object[] { this.entity });
+                                this.tempObject.data[i] = val;
+                                this.tempObject.dataHas[i] = (bool)gMethodHas.Invoke(null, new object[] { this.entity });
+                            }
+                            ++i;
+                        }
                     }
-                    ++i;
                 }
             }
 
@@ -473,7 +513,7 @@ namespace ME.BECS.Editor {
                 var type = kv.Value;
                 {
                     var gHas = methodHas.MakeGenericMethod(type);
-                    var has = (bool)gHas.Invoke(world.state->components, new object[] { this.entity });
+                    var has = (bool)gHas.Invoke(world.state.ptr->components, new object[] { this.entity });
                     if (has == true) {
                         ++count;
                     }
@@ -488,10 +528,10 @@ namespace ME.BECS.Editor {
                     var type = kv.Value;
                     {
                         var gHas = methodHas.MakeGenericMethod(type);
-                        var has = (bool)gHas.Invoke(world.state->components, new object[] { this.entity });
+                        var has = (bool)gHas.Invoke(world.state.ptr->components, new object[] { this.entity });
                         if (has == true) {
                             var gMethod = methodRead.MakeGenericMethod(type);
-                            var val = gMethod.Invoke(world.state->components, new object[] { this.entity });
+                            var val = gMethod.Invoke(world.state.ptr->components, new object[] { this.entity });
                             this.tempObject.dataShared[i++] = val;
                         }
                     }
@@ -502,20 +542,24 @@ namespace ME.BECS.Editor {
                     var type = kv.Value;
                     {
                         var gHas = methodHas.MakeGenericMethod(type);
-                        var has = (bool)gHas.Invoke(world.state->components, new object[] { this.entity });
+                        var has = (bool)gHas.Invoke(world.state.ptr->components, new object[] { this.entity });
                         if (has == true) {
                             var gMethod = methodRead.MakeGenericMethod(type);
-                            var val = gMethod.Invoke(world.state->components, new object[] { this.entity });
+                            var val = gMethod.Invoke(world.state.ptr->components, new object[] { this.entity });
                             list.Add(val);
                         }
                     }
                 }
                 this.tempObject.dataShared = list.ToArray();
+                this.tempObject.dataSharedHas = new bool[list.Count];
+                for (int i = 0; i < this.tempObject.dataSharedHas.Length; ++i) {
+                    this.tempObject.dataSharedHas[i] = true;
+                }
             }
 
         }
 
-        public static void DrawFields(Ent entity, VisualElement root, VisualElement rootContainer, System.Collections.Generic.List<VisualElement> fields, World world, object[] arrData, SerializedObject serializedObject, string fieldName, System.Reflection.MethodInfo methodSet, System.Reflection.MethodInfo methodRead) {
+        public static void DrawFields(Ent entity, VisualElement root, VisualElement rootContainer, System.Collections.Generic.List<VisualElement> fields, World world, object[] arrData, bool[] arrDataHas, SerializedObject serializedObject, string fieldName, System.Reflection.MethodInfo methodSet, System.Reflection.MethodInfo methodRead) {
 
             var dataArr = serializedObject.FindProperty(fieldName);
             var delta = dataArr.arraySize - fields.Count;
@@ -527,7 +571,8 @@ namespace ME.BECS.Editor {
 
                     var it = dataArr.GetArrayElementAtIndex(i);
                     var copy = it.Copy();
-                    var label = EditorUtils.GetComponentName(arrData[i].GetType());
+                    var type = arrData[i].GetType();
+                    var label = EditorUtils.GetComponentName(type);
                     if (copy.hasVisibleChildren == true) {
                         var propertyField = new PropertyField(copy, label) {
                             name = $"PropertyField:{it.propertyPath}",
@@ -536,6 +581,10 @@ namespace ME.BECS.Editor {
                         propertyField.AddToClassList("field");
                         propertyField.BindProperty(copy);
                         propertyField.Bind(serializedObject);
+                        if (EditorUtils.TryGetComponentGroupColor(type, out var color) == true) {
+                            color.a = 0.1f;
+                            propertyField.style.backgroundColor = new StyleColor(color);
+                        }
                         System.Action rebuild = () => {
                             var allChilds = propertyField.Query<PropertyField>().ToList();
                             foreach (var child in allChilds) {
@@ -560,12 +609,12 @@ namespace ME.BECS.Editor {
                                         object prevData;
                                         {
                                             var gMethod = methodRead.MakeGenericMethod(value.GetType());
-                                            prevData = gMethod.Invoke(world.state->components, new object[] { entity });
+                                            prevData = gMethod.Invoke(world.state.ptr->components, new object[] { entity });
                                         }
                                         var hasChanged = StructsAreEqual(prevData, newValue) == false;
                                         if (hasChanged == true) {
                                             var gMethod = methodSet.MakeGenericMethod(value.GetType());
-                                            gMethod.Invoke(world.state->components, new object[] { entity, value });
+                                            gMethod.Invoke(world.state.ptr->components, new object[] { entity, value });
                                         }
                                     }*/
 
@@ -581,6 +630,10 @@ namespace ME.BECS.Editor {
                     } else {
                         
                         var labelField = new Label();
+                        if (EditorUtils.TryGetComponentGroupColor(type, out var color) == true) {
+                            color.a = 0.1f;
+                            labelField.style.backgroundColor = new StyleColor(color);
+                        }
                         labelField.text = label;
                         labelField.AddToClassList("field");
                         labelField.AddToClassList("no-children");
@@ -611,6 +664,13 @@ namespace ME.BECS.Editor {
 
                     var field = fields[i];
                     var it = dataArr.GetArrayElementAtIndex(i);
+                    if (arrDataHas[i] == true) {
+                        field.RemoveFromClassList("disabled");
+                        field.AddToClassList("enabled");
+                    } else {
+                        field.RemoveFromClassList("enabled");
+                        field.AddToClassList("disabled");
+                    }
                     if (field is PropertyField propertyField) {
                         var copy = it.Copy();
                         propertyField.name = $"PropertyField:{it.propertyPath}";
@@ -630,7 +690,7 @@ namespace ME.BECS.Editor {
         }
 
         public static bool StructCopy<T>(T data, T data2) where T : unmanaged {
-            var size = sizeof(T);
+            var size = TSize<T>.size;
             var addr1 = _address(ref data);
             var addr2 = _address(ref data2);
             return _memcmp(addr1, addr2, size) == 0;

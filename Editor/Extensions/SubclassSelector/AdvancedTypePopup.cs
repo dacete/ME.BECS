@@ -41,6 +41,7 @@ namespace ME.BECS.Editor.Extensions.SubclassSelector {
             var isSingleNamespace = true;
             var namespaces = new string[AdvancedTypePopup.kMaxNamespaceNestCount];
             foreach (var type in typeArray) {
+                if (type == null) continue;
                 var splittedTypePath = TypeMenuUtility.GetSplittedTypePath(type);
                 if (splittedTypePath.Length <= 1) {
                     continue;
@@ -69,6 +70,7 @@ namespace ME.BECS.Editor.Extensions.SubclassSelector {
 
             // Add type items.
             foreach (var type in typeArray) {
+                if (type == null) continue;
                 var splittedTypePath = TypeMenuUtility.GetSplittedTypePath(type);
                 if (splittedTypePath.Length == 0) {
                     continue;
@@ -116,9 +118,10 @@ namespace ME.BECS.Editor.Extensions.SubclassSelector {
         private bool showNullElement;
 
         public event Action<AdvancedTypePopupItem> OnItemSelected;
-
-        public AdvancedTypePopup(IEnumerable<Type> types, int maxLineCount, AdvancedDropdownState state, bool showNullElement) : base(state) {
+        
+        public AdvancedTypePopup(IEnumerable<Type> types, int maxLineCount, AdvancedDropdownState state, bool showNullElement, Vector2 minSize) : base(state) {
             this.SetTypes(types);
+            this.minimumSize = minSize;
             this.minimumSize = new Vector2(this.minimumSize.x, EditorGUIUtility.singleLineHeight * maxLineCount + AdvancedTypePopup.k_HeaderHeight);
             this.showNullElement = showNullElement;
         }

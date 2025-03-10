@@ -38,6 +38,9 @@ namespace ME.BECS {
         public static readonly Unity.Burst.SharedStatic<ME.BECS.Internal.Array<System.IntPtr>> defaultValuesBurst = Unity.Burst.SharedStatic<ME.BECS.Internal.Array<System.IntPtr>>.GetOrCreatePartiallyUnsafeWithHashCode<StaticTypes>(TAlign<ME.BECS.Internal.Array<System.IntPtr>>.align, 10205);
         public static ref ME.BECS.Internal.Array<System.IntPtr> defaultValues => ref defaultValuesBurst.Data;
 
+        public static readonly Unity.Burst.SharedStatic<ME.BECS.Internal.Array<uint>> collectionsCountBurst = Unity.Burst.SharedStatic<ME.BECS.Internal.Array<uint>>.GetOrCreatePartiallyUnsafeWithHashCode<StaticTypes>(TAlign<ME.BECS.Internal.Array<uint>>.align, 10206);
+        public static ref ME.BECS.Internal.Array<uint> collectionsCount => ref collectionsCountBurst.Data;
+
     }
 
     public struct StaticSharedTypes {
@@ -57,6 +60,7 @@ namespace ME.BECS {
     public struct StaticTypesLoadedManaged {
 
         public static readonly System.Collections.Generic.Dictionary<uint, System.Type> loadedTypes = new System.Collections.Generic.Dictionary<uint, System.Type>();
+        public static readonly System.Collections.Generic.Dictionary<uint, System.Type> loadedStaticTypes = new System.Collections.Generic.Dictionary<uint, System.Type>();
         public static readonly System.Collections.Generic.Dictionary<System.Type, uint> typeToId = new System.Collections.Generic.Dictionary<System.Type, uint>();
         public static readonly System.Collections.Generic.Dictionary<uint, System.Type> loadedSharedTypes = new System.Collections.Generic.Dictionary<uint, System.Type>();
         public static readonly System.Collections.Generic.Dictionary<uint, bool> loadedSharedTypesCustomHash = new System.Collections.Generic.Dictionary<uint, bool>();
@@ -115,15 +119,15 @@ namespace ME.BECS {
     public struct StaticTypesShared<T> where T : unmanaged, IComponentShared {
 
         public static void AOT() {
-            default(EntityConfig).data.AOTShared<T>();
+            
         }
 
     }
 
-    public struct StaticTypesStatic<T> where T : unmanaged, IComponentStatic {
+    public struct StaticTypesStatic<T> where T : unmanaged, IConfigComponentStatic {
 
-        public static void AOT() {
-            default(EntityConfig).data.AOTStatic<T>();
+        public static unsafe void AOT() {
+            UnsafeEntityConfig.StaticData.MethodCaller<T>.Call(default, null, default);
         }
 
     }
@@ -131,14 +135,8 @@ namespace ME.BECS {
     public unsafe struct ConfigInitializeTypes<T> where T : unmanaged, IConfigInitialize {
 
         public static void AOT() {
-            UnsafeEntityConfig.DataInitialize.MethodCaller<T>.CallNoBurst(null, default);
+            UnsafeEntityConfig.DataInitialize.MethodCaller<T>.Call(default, null, default);
         }
-
-    }
-
-    public struct StaticTypesDefaultValue<T> where T : unmanaged, IComponent {
-
-        public static readonly Unity.Burst.SharedStatic<T> value = Unity.Burst.SharedStatic<T>.GetOrCreate<StaticTypesDefaultValue<T>>();
 
     }
 
@@ -172,11 +170,24 @@ namespace ME.BECS {
         }
 
     }
-    
-    public struct StaticTypes<T> where T : unmanaged, IComponent {
+
+    public struct StaticTypesNames<T> {
+
+        public static readonly Unity.Burst.SharedStatic<Unity.Collections.FixedString512Bytes> name = Unity.Burst.SharedStatic<Unity.Collections.FixedString512Bytes>.GetOrCreate<StaticTypesNames<T>>();
+
+    }
+
+    public struct StaticTypesDefault<T> where T : unmanaged {
+
+        public static readonly Unity.Burst.SharedStatic<T> defaultValue = Unity.Burst.SharedStatic<T>.GetOrCreate<StaticTypesDefault<T>>();
+
+    }
+
+    public struct StaticTypes<T> where T : unmanaged, IComponentBase {
 
         private static readonly T defaultZero = default;
 
+        public static ref Unity.Collections.FixedString512Bytes name => ref StaticTypesNames<T>.name.Data;
         public static ref uint staticTypeId => ref StaticTypesStaticTypeId<T>.value.Data;
         public static ref uint sharedTypeId => ref StaticTypesSharedTypeId<T>.value.Data;
         public static ref bool hasSharedCustomHash => ref StaticTypesSharedCustomHash<T>.value.Data;
@@ -184,31 +195,60 @@ namespace ME.BECS {
         public static ref bool isTag => ref StaticTypesIsTag<T>.value.Data;
         public static ref uint groupId => ref StaticTypesGroupId<T>.value.Data;
 
-        public static ref readonly T defaultValue {
+        public static unsafe ref readonly T defaultValue {
             get {
                 if (StaticTypesHasDefaultValue<T>.value.Data == true) {
-                    return ref StaticTypesDefaultValue<T>.value.Data;
+                    return ref *(T*)StaticTypes.defaultValues.Get(StaticTypes<T>.typeId);
                 }
 
                 return ref defaultZero;
             }
         }
 
-        public static void AOT() {
-            default(EntityConfig).data.AOT<T>();
+        public static unsafe safe_ptr defaultValuePtr {
+            get {
+                if (StaticTypesHasDefaultValue<T>.value.Data == true) {
+                    return (safe_ptr)(T*)StaticTypes.defaultValues.Get(StaticTypes<T>.typeId);
+                }
+
+                return default;
+            }
+        }
+
+        public static unsafe ref T defaultValueGet {
+            get {
+                if (StaticTypesHasDefaultValue<T>.value.Data == true) {
+                    return ref *(T*)StaticTypes.defaultValues.Get(StaticTypes<T>.typeId);
+                }
+
+                return ref StaticTypesDefault<T>.defaultValue.Data;
+            }
+        }
+
+        public static unsafe void AOT() {
+            UnsafeEntityConfig.Data.MethodCaller<T>.Call(default, null, default);
+        }
+
+        [INLINE(256)]
+        public static void SetCollectionsCount(uint count) {
+
+            StaticTypes.collectionsCount.Get(StaticTypes<T>.typeId) = count;
+            
         }
 
         [INLINE(256)]
         public static void Validate(bool isTag) {
 
-            if (typeId == 0u) {
+            if (typeId == 0u && typeof(T) != typeof(TNull)) {
                 StaticTypes<T>.typeId = ++StaticTypes.counter;
                 StaticTypes<T>.isTag = isTag;
-                StaticTypes.sizes.Resize(StaticTypes<T>.typeId + 1u);
+                var typeId = (StaticTypes<T>.typeId + 1u);// * 2u;
+                StaticTypes.sizes.Resize(typeId);
                 StaticTypes.sizes.Get(StaticTypes<T>.typeId) = isTag == true ? 0u : TSize<T>.size;
-                StaticTypes.groups.Resize(StaticTypes<T>.typeId + 1u);
+                StaticTypes.groups.Resize(typeId);
                 StaticTypes.groups.Get(StaticTypes<T>.typeId) = groupId;
-                StaticTypes.defaultValues.Resize(StaticTypes<T>.typeId + 1u);
+                StaticTypes.defaultValues.Resize(typeId);
+                StaticTypesNames<T>.name.Data = typeof(T).Name;
                 StaticTypes<T>.AddTypeToCache();
             }
 
@@ -217,11 +257,10 @@ namespace ME.BECS {
         [INLINE(256)]
         public static unsafe void SetDefaultValue(T data) {
 
-            StaticTypesDefaultValue<T>.value.Data = data;
             StaticTypesHasDefaultValue<T>.value.Data = true; 
-            var defaultValuePtr = (T*)_make(TSize<T>.sizeInt, TAlign<T>.alignInt, Constants.ALLOCATOR_DOMAIN);
-            *defaultValuePtr = StaticTypes<T>.defaultValue;
-            StaticTypes.defaultValues.Get(StaticTypes<T>.typeId) = (System.IntPtr)defaultValuePtr;
+            var defaultValuePtr = (safe_ptr<T>)_make(TSize<T>.sizeInt, TAlign<T>.alignInt, Constants.ALLOCATOR_DOMAIN);
+            *defaultValuePtr.ptr = data;
+            StaticTypes.defaultValues.Get(StaticTypes<T>.typeId) = (System.IntPtr)defaultValuePtr.ptr;
             
         }
 
@@ -268,7 +307,11 @@ namespace ME.BECS {
 
         [Unity.Burst.BurstDiscard]
         public static void AddTypeToCache() {
-            StaticTypesLoadedManaged.loadedTypes.Add(StaticTypes<T>.typeId, typeof(T));
+            if (typeof(IConfigComponentStatic).IsAssignableFrom(typeof(T)) == true) {
+                StaticTypesLoadedManaged.loadedStaticTypes.Add(StaticTypes<T>.typeId, typeof(T));
+            } else {
+                StaticTypesLoadedManaged.loadedTypes.Add(StaticTypes<T>.typeId, typeof(T));
+            }
             StaticTypesLoadedManaged.typeToId.Add(typeof(T), StaticTypes<T>.typeId);
         }
 

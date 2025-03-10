@@ -60,7 +60,7 @@ namespace ME.BECS.Tests {
         }
 
         [Unity.Burst.BurstCompileAttribute]
-        private struct JobComponents : IJobParallelForComponents<TestComponent> {
+        public struct JobComponents : IJobForComponents<TestComponent> {
 
             public void Execute(in JobInfo jobInfo, in Ent ent, ref TestComponent component) {
 
@@ -103,7 +103,7 @@ namespace ME.BECS.Tests {
                     ent3 = ent;
                 }
 
-                var job = API.Query(world).Without<Test2Component>().Schedule<JobComponents, TestComponent>(new JobComponents());
+                var job = API.Query(world, Batches.Apply(default, world)).Without<Test2Component>().AsParallel().Schedule<JobComponents, TestComponent>(new JobComponents());
                 job.Complete();
                 
                 Assert.AreEqual(2, ent1.Read<TestComponent>().data);
@@ -133,7 +133,7 @@ namespace ME.BECS.Tests {
                 ent2.Set<Aspect2>();
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .WithAspect<Aspect1>()
                    .WithAspect<Aspect2>()
                    .ForEach((in CommandBufferJob commandBuffer) => {
@@ -164,7 +164,7 @@ namespace ME.BECS.Tests {
                 ent2.Set(new Test4Component());
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .WithAspect<Aspect2>()
                    .ForEach((in CommandBufferJob commandBuffer) => {
                        result.Add(commandBuffer.ent);
@@ -199,7 +199,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .ForEach((in CommandBufferJob commandBuffer) => {
                        result.Add(commandBuffer.ent);
                    });
@@ -215,6 +215,36 @@ namespace ME.BECS.Tests {
             
         }
         
+        [Test]
+        public void Static() {
+
+            var config = ME.BECS.EntityConfig.CreateInstance<ME.BECS.EntityConfig>();
+            config.data.components = new IConfigComponent[] {
+                new Tests_EntityConfig.TestConfig1Component() { data = 1 },
+                new Tests_EntityConfig.TestConfig2Component() { data = 2 },
+            };
+            config.staticData.components = new IConfigComponentStatic[] {
+                new Tests_EntityConfig.TestConfig1StaticComponent() { data = 1 },
+                new Tests_EntityConfig.TestConfig2StaticComponent() { data = 2 },
+            };
+            ObjectReferenceRegistry.AddRuntimeObject(config);
+
+            {
+                using var world = World.Create();
+                var ent = Ent.New();
+                config.Apply(ent);
+                Ent filteredEnt = default;
+                API.Query(world, Batches.Apply(default, world))
+                   .With<Tests_EntityConfig.TestConfig1StaticComponent>()
+                   .Without<Tests_EntityConfig.TestArrayComponentStatic>()
+                   .ForEach((in CommandBufferJob commandBuffer) => { filteredEnt = ent; });
+                Assert.AreEqual(filteredEnt, ent);
+            }
+            
+            UnityEngine.Object.DestroyImmediate(config);
+
+        }
+
         [Test]
         public void With() {
 
@@ -238,7 +268,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -263,7 +293,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -289,7 +319,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<Test2Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -322,7 +352,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Without<Test3Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
@@ -348,7 +378,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .Without<Test2Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -374,7 +404,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .Without<Test3Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -411,7 +441,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Without<Test3Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
@@ -442,7 +472,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .WithAll<TestComponent, Test2Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -470,7 +500,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .WithAll<TestComponent, Test2Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -506,7 +536,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .WithAny<TestComponent, Test2Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -536,7 +566,7 @@ namespace ME.BECS.Tests {
                 });
 
                 var result = new System.Collections.Generic.List<Ent>();
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .WithAny<TestComponent, Test2Component>()
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
@@ -568,43 +598,43 @@ namespace ME.BECS.Tests {
 
                 var result = new System.Collections.Generic.List<Ent>();
 
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Step(5, 300)
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
                 Assert.AreEqual(300, result.Count);
 
-                world.Tick(0f).Complete();
+                world.Tick(0u, UpdateType.FIXED_UPDATE).Complete();
 
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Step(5, 300)
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
                 Assert.AreEqual(600, result.Count);
 
-                world.Tick(0f).Complete();
+                world.Tick(0u, UpdateType.FIXED_UPDATE).Complete();
                 
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Step(5, 300)
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
                 Assert.AreEqual(900, result.Count);
 
-                world.Tick(0f).Complete();
+                world.Tick(0u, UpdateType.FIXED_UPDATE).Complete();
                 
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Step(5, 300)
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
 
                 Assert.AreEqual(1000, result.Count);
 
-                world.Tick(0f).Complete();
+                world.Tick(0u, UpdateType.FIXED_UPDATE).Complete();
 
-                API.Query(world)
+                API.Query(world, Batches.Apply(default, world))
                    .With<TestComponent>()
                    .Step(5, 300)
                    .ForEach((in CommandBufferJob commandBuffer) => { result.Add(commandBuffer.ent); });
@@ -633,9 +663,11 @@ namespace ME.BECS.Tests {
 
                 }
 
+                Batches.Apply(world.state);
+                
                 var result = new System.Collections.Generic.List<Ent>();
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .AsJob()
                                 .ForEach((in CommandBufferJob commandBuffer) => {
@@ -711,7 +743,7 @@ namespace ME.BECS.Tests {
 
                 }
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .Schedule<ScheduleJob>();
                 handle.Complete();
@@ -742,7 +774,7 @@ namespace ME.BECS.Tests {
 
                 }
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .Schedule<ScheduleJob2>();
                 handle.Complete();
@@ -776,7 +808,7 @@ namespace ME.BECS.Tests {
 
                 }
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .ScheduleParallelFor<ScheduleParallelJob>();
                 handle.Complete();
@@ -807,7 +839,7 @@ namespace ME.BECS.Tests {
 
                 }
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .ScheduleParallelForBatch<ScheduleParallelJobBatch>();
                 handle.Complete();
@@ -840,7 +872,7 @@ namespace ME.BECS.Tests {
 
                 var result = new System.Collections.Generic.List<Ent>();
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .ParallelFor(300)
                                 .ForEach((in CommandBufferJob commandBuffer) => {
@@ -874,7 +906,7 @@ namespace ME.BECS.Tests {
 
                 var result = new System.Collections.Generic.List<Ent>();
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .ParallelFor(300)
                                 .WithBurst()
@@ -919,7 +951,7 @@ namespace ME.BECS.Tests {
 
                 }
 
-                var handle = API.Query(world)
+                var handle = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .ParallelFor(300)
                                 .WithBurst()
@@ -951,7 +983,7 @@ namespace ME.BECS.Tests {
                 
                 }
 
-                var result = API.Query(world)
+                var result = API.Query(world, Batches.Apply(default, world))
                                 .With<TestComponent>()
                                 .ToArray();
                 
@@ -975,7 +1007,7 @@ namespace ME.BECS.Tests {
             ent.Get<TestComponent>().data = 1;
 
             var count = 0;
-            var handle = API.Query(world)
+            var handle = API.Query(world, Batches.Apply(default, world))
                             .With<TestComponent>()
                             .Without<Test3Component>()
                             .WithAny<TestComponent, Test2Component>()
@@ -1003,37 +1035,19 @@ namespace ME.BECS.Tests {
         }
 
         [Unity.Burst.BurstCompileAttribute]
-        public struct Job1 : IJobParallelForCommandBuffer {
+        public struct Job1 : IJobForComponents {
             
-            public void Execute(in CommandBufferJobParallel commandBuffer) {
-                commandBuffer.ent.Set(new Test2Component());
+            public void Execute(in JobInfo jobInfo, in Ent ent) {
+                ent.Set(new Test2Component());
             }
 
         }
 
         [Unity.Burst.BurstCompileAttribute]
-        public struct Job2 : IJobParallelForCommandBuffer {
+        public struct Job2 : IJobForComponents {
             
-            public void Execute(in CommandBufferJobParallel commandBuffer) {
-                commandBuffer.ent.Set(new Test3Component());
-            }
-
-        }
-
-        [Unity.Burst.BurstCompileAttribute]
-        public struct Job0 : IJob {
-
-            public int amount;
-            
-            public void Execute() {
-                
-                for (int i = 0; i < this.amount; ++i) {
-                    var ent = Ent.New();
-                    ent.Set(new TestComponent() {
-                        data = 1,
-                    });
-                }
-                
+            public void Execute(in JobInfo jobInfo, in Ent ent) {
+                ent.Set(new Test3Component());
             }
 
         }
@@ -1044,17 +1058,24 @@ namespace ME.BECS.Tests {
             {
                 var world = World.Create();
 
-                var amount = 10_000;
-                var dep = new Job0() {
-                    amount = amount,
-                }.Schedule();
+                var amount = 100_000;
+                for (int i = 0; i < amount; ++i) {
+                    var ent = Ent.New();
+                    ent.Set(new TestComponent() {
+                        data = 1,
+                    });
+                }
 
-                var d1 = API.Query(world, dep).With<TestComponent>().ScheduleParallelFor<Job1>();
-                var d2 = API.Query(world, dep).With<TestComponent>().ScheduleParallelFor<Job2>();
+                // sync point
+                Batches.Apply(world.state);
+                
+                var d1 = API.Query(world).With<TestComponent>().AsParallel().Schedule<Job1>();
+                var d2 = API.Query(world).With<TestComponent>().AsParallel().Schedule<Job2>();
 
                 var d3 = JobHandle.CombineDependencies(d1, d2);
+                d3.Complete();
                 
-                var arr = API.Query(world, d3).With<TestComponent>().ToArray();
+                var arr = API.Query(world, Batches.Apply(d3, world)).With<TestComponent>().ToArray();
                 Assert.AreEqual(arr.Length, amount);
                 for (int i = 0; i < arr.Length; ++i) {
                     Assert.IsTrue(arr[i].Has<TestComponent>(), "index: " + i);
@@ -1065,6 +1086,76 @@ namespace ME.BECS.Tests {
                 world.Dispose();
 
             }
+        }
+
+        [Unity.Burst.BurstCompileAttribute]
+        public struct Job1Unsafe : IJobForComponents<TestComponent> {
+
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TestComponent component) {
+                ent.Set(new Test2Component());
+            }
+
+        }
+
+        [Unity.Burst.BurstCompileAttribute]
+        public struct Job2Unsafe : IJobForComponents<TestComponent> {
+            
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TestComponent component) {
+                ent.Set(new Test3Component());
+            }
+
+        }
+
+        [Unity.Burst.BurstCompileAttribute]
+        public struct TestA1Job : IJobForAspects<TestAspect> {
+            
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TestAspect asp) {
+                asp.data.data = asp.data5read.data;
+            }
+
+        }
+
+        [Unity.Burst.BurstCompileAttribute]
+        public struct TestA2Job : IJobForAspects<TestAspect> {
+            
+            public void Execute(in JobInfo jobInfo, in Ent ent, ref TestAspect asp) {
+                asp.data2.data = 123;
+            }
+
+        }
+
+        [Test]
+        public void ComponentsDisableSafetyCheck() {
+
+            var world = World.Create();
+
+            var amount = 1000;
+            for (int i = 0; i < amount; ++i) {
+                var ent = Ent.New();
+                ent.Set(new TestComponent() {
+                    data = 1,
+                });
+            }
+
+            // sync point
+            Batches.Apply(world.state);
+
+            {
+                var d1 = API.Query(world).AsParallel().Schedule<TestA1Job, TestAspect>();
+                var d2 = API.Query(world).AsParallel().Schedule<TestA2Job, TestAspect>();
+                var d3 = JobHandle.CombineDependencies(d1, d2);
+                d3.Complete();
+            }
+
+            {
+                var d1 = API.Query(world).AsUnsafe().AsParallel().Schedule<Job1Unsafe, TestComponent>();
+                var d2 = API.Query(world).AsUnsafe().AsParallel().Schedule<Job2Unsafe, TestComponent>();
+                var d3 = JobHandle.CombineDependencies(d1, d2);
+                d3.Complete();
+            }
+
+            world.Dispose();
+
         }
 
     }

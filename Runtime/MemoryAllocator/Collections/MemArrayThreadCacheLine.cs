@@ -1,21 +1,30 @@
-using Unity.Jobs;
+#if FIXED_POINT
+using tfloat = sfloat;
+using ME.BECS.FixedPoint;
+using Bounds = ME.BECS.FixedPoint.AABB;
+using Rect = ME.BECS.FixedPoint.Rect;
+#else
+using tfloat = System.Single;
+using Unity.Mathematics;
+using Bounds = UnityEngine.Bounds;
+using Rect = UnityEngine.Rect;
+#endif
 
 namespace ME.BECS {
     
-    using Unity.Collections.LowLevel.Unsafe;
     using INLINE = System.Runtime.CompilerServices.MethodImplAttribute;
+    using Unity.Jobs;
     using static Cuts;
-    using Unity.Mathematics;
 
     [System.Diagnostics.DebuggerTypeProxyAttribute(typeof(MemArrayThreadCacheLineProxy<>))]
     public unsafe struct MemArrayThreadCacheLine<T> : IIsCreated where T : unmanaged {
 
-        private static readonly uint CACHE_LINE_SIZE = math.max(JobUtils.CacheLineSize / TSize<T>.size, 1u);
+        private static readonly uint CACHE_LINE_SIZE = _align(TSize<T>.size, JobUtils.CacheLineSize);
 
         private readonly MemPtr arrPtr;
         public readonly uint Length => JobUtils.ThreadsCount;
 
-        public readonly bool isCreated {
+        public readonly bool IsCreated {
             [INLINE(256)]
             get => this.arrPtr.IsValid();
         }
@@ -24,11 +33,9 @@ namespace ME.BECS {
         public MemArrayThreadCacheLine(ref MemoryAllocator allocator, ClearOptions clearOptions = ClearOptions.ClearMemory) {
 
             this = default;
-            var size = TSize<T>.size;
-            var memPtr = MemoryAllocatorExt.Alloc(ref allocator, this.Length * size * CACHE_LINE_SIZE);
-            
+            var memPtr = allocator.Alloc(CACHE_LINE_SIZE * this.Length);
             if (clearOptions == ClearOptions.ClearMemory) {
-                allocator.MemClear(memPtr, 0u, this.Length * size * CACHE_LINE_SIZE);
+                allocator.MemClear(memPtr, 0u, CACHE_LINE_SIZE * this.Length);
             }
             
             this.arrPtr = memPtr;
@@ -62,17 +69,17 @@ namespace ME.BECS {
         }
 
         [INLINE(256)]
-        public readonly void* GetUnsafePtr(in MemoryAllocator allocator) {
+        public readonly safe_ptr GetUnsafePtr(in MemoryAllocator allocator) {
 
-            return MemoryAllocatorExt.GetUnsafePtr(in allocator, this.arrPtr);
+            return allocator.GetUnsafePtr(this.arrPtr);
 
         }
 
-        public readonly ref T this[State* state, int index] {
+        public readonly ref T this[safe_ptr<State> state, int index] {
             [INLINE(256)]
             get {
                 E.RANGE(index, 0, this.Length);
-                return ref *((T*)this.GetUnsafePtr(in state->allocator) + index * CACHE_LINE_SIZE);
+                return ref *(T*)((safe_ptr<byte>)this.GetUnsafePtr(in state.ptr->allocator) + (uint)index * CACHE_LINE_SIZE).ptr;
             }
         }
 
@@ -80,7 +87,7 @@ namespace ME.BECS {
             [INLINE(256)]
             get {
                 E.RANGE(index, 0, this.Length);
-                return ref *((T*)this.GetUnsafePtr(in allocator) + index * CACHE_LINE_SIZE);
+                return ref *(T*)((safe_ptr<byte>)this.GetUnsafePtr(in allocator) + (uint)index * CACHE_LINE_SIZE).ptr;
             }
         }
 
@@ -88,23 +95,22 @@ namespace ME.BECS {
             [INLINE(256)]
             get {
                 E.RANGE(index, 0, this.Length);
-                return ref *((T*)this.GetUnsafePtr(in allocator) + index * CACHE_LINE_SIZE);
+                return ref *(T*)((safe_ptr<byte>)this.GetUnsafePtr(in allocator) + index * CACHE_LINE_SIZE).ptr;
             }
         }
 
-        public readonly ref T this[State* state, uint index] {
+        public readonly ref T this[safe_ptr<State> state, uint index] {
             [INLINE(256)]
             get {
                 E.RANGE(index, 0, this.Length);
-                return ref *((T*)this.GetUnsafePtr(in state->allocator) + index * CACHE_LINE_SIZE);
+                return ref *(T*)((safe_ptr<byte>)this.GetUnsafePtr(in state.ptr->allocator) + index * CACHE_LINE_SIZE).ptr;
             }
         }
 
         [INLINE(256)]
         public void Clear(ref MemoryAllocator allocator) {
 
-            var size = TSize<T>.size * CACHE_LINE_SIZE;
-            allocator.MemClear(this.arrPtr, 0L, this.Length * size);
+            allocator.MemClear(this.arrPtr, 0L, this.Length * CACHE_LINE_SIZE);
 
         }
 
@@ -115,7 +121,7 @@ namespace ME.BECS {
 
         public uint GetReservedSizeInBytes() {
 
-            return this.Length * (uint)sizeof(T) * CACHE_LINE_SIZE;
+            return this.Length * CACHE_LINE_SIZE;
 
         }
 

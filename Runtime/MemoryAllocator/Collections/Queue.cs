@@ -7,12 +7,12 @@ namespace ME.BECS {
 
         public struct Enumerator : System.Collections.Generic.IEnumerator<T> {
 
-            private State* state;
+            private safe_ptr<State> state;
             private Queue<T> q;
             private int index; // -1 = not started, -2 = ended/disposed
             private T currentElement;
 
-            internal Enumerator(Queue<T> q, State* state) {
+            internal Enumerator(Queue<T> q, safe_ptr<State> state) {
                 this.q = q;
                 this.index = -1;
                 this.currentElement = default(T);
@@ -37,7 +37,7 @@ namespace ME.BECS {
                     return false;
                 }
 
-                this.currentElement = this.q.GetElement(in this.state->allocator, (uint)this.index);
+                this.currentElement = this.q.GetElement(in this.state.ptr->allocator, (uint)this.index);
                 return true;
             }
 
@@ -68,7 +68,7 @@ namespace ME.BECS {
         private uint tail;
         private uint size;
         private uint version;
-        public readonly bool isCreated => this.array.isCreated;
+        public readonly bool isCreated => this.array.IsCreated;
 
         public readonly uint Count => this.size;
         public readonly uint Capacity => this.array.Length;
@@ -89,7 +89,7 @@ namespace ME.BECS {
             return new Enumerator(this, world.state);
         }
 
-        public readonly Enumerator GetEnumerator(State* state) {
+        public readonly Enumerator GetEnumerator(safe_ptr<State> state) {
             return new Enumerator(this, state);
         }
 
@@ -153,7 +153,7 @@ namespace ME.BECS {
         }
 
         private void SetCapacity(ref MemoryAllocator allocator, uint capacity) {
-            this.array.Resize(ref allocator, capacity);
+            this.array.Resize(ref allocator, capacity, 2);
             this.head = 0;
             this.tail = this.size == capacity ? 0 : this.size;
             this.version++;
