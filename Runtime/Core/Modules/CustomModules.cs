@@ -1,6 +1,16 @@
+using UnityEngine;
+
 namespace ME.BECS {
     
     public static class CustomModules {
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterAssembliesLoaded)]
+        static void Reload()
+        {
+            resetPass = null;
+            firstPass = null;
+            secondPass = null;
+        }
 
         private static event InitializeResetPass resetPass; 
         private static event InitializeFirstPass firstPass; 
